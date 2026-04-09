@@ -1,57 +1,116 @@
-# CSV AI Spreadsheet
+# URL Scraper
 
-A tiny browser-based spreadsheet for working with CSV files and running prompts across rows and columns using either OpenAI or Claude.
+Async, URL-based company extraction with layered heuristics for publicly accessible pages.
 
-## What it does
+## What it extracts
 
-- Import a CSV file
-- Edit cells directly in the browser
-- Rename headers
-- Export the updated sheet back to CSV
-- Run prompts over selected rows or columns
-- Inspect structured JSON responses
-- Create separate columns from JSON fields such as `confidence`
+- `company_name`
+- `website`
+- `linkedin_url`
 
-## Google Login
+## Project Structure
 
-This version supports Google sign-in through Firebase Auth.
+```text
+main.py
+pyproject.toml
+requirements.txt
+url_extractor/
+  __init__.py
+  __main__.py
+  cleaning.py
+  cli.py
+  extractors.py
+  fetcher.py
+  models.py
+  pipeline.py
+```
 
-Set these Vercel environment variables:
+## Install
 
-`FIREBASE_API_KEY`
-`FIREBASE_AUTH_DOMAIN`
-`FIREBASE_PROJECT_ID`
-`FIREBASE_STORAGE_BUCKET`
-`FIREBASE_MESSAGING_SENDER_ID`
-`FIREBASE_APP_ID`
-`FIREBASE_MEASUREMENT_ID` optional
+```bash
+pip install -r requirements.txt
+```
 
-In Firebase, enable:
+## Run
 
-- Google as an Auth provider
-- Firestore for the database
-- Your Vercel domain in Auth authorized domains
+Single URL:
 
-Per-user API keys and settings are stored in Firestore under the signed-in user's Firebase Auth uid. That keeps one user's workspace separate from another user's workspace and syncs across devices.
+```bash
+python main.py --url https://example.com
+```
 
-For Firestore security, use the included `firestore.rules` so each signed-in user can only read and write their own document.
+Batch from JSON:
 
-## Run it
+```bash
+python main.py --input urls.json --output results.json
+```
 
-1. Install Node.js 18 or newer.
-2. Open a terminal in this folder.
-3. Run `npm start`.
-4. Open `http://localhost:3000`.
+Batch from CSV:
 
-## API setup
+```bash
+python main.py --input urls.csv --output results.json
+```
 
-The app uses a local proxy server so API keys stay off the page.
+## Input Formats
 
-- OpenAI: choose `OpenAI`, enter your API key, and optionally override the model.
-- Claude: choose `Claude`, enter your API key, and optionally override the model.
+JSON:
 
-## Notes
+```json
+[
+  "https://www.reddit.com/r/startups/comments/xyz",
+  "https://directorysite.com/company/abc",
+  "https://forum.com/thread/123"
+]
+```
 
-- The UI is being tightened toward a Clay-style workflow.
-- AI columns now support predefining output fields like `decision`, `confidence`, and `reason`, then filling them from JSON results.
-- Firestore is now the per-user database layer for saved API keys, models, and sheet settings.
+CSV:
+
+```csv
+url
+https://example.com
+https://example.org
+```
+
+## Output Schema
+
+```json
+{
+  "url": "https://example.com",
+  "company_name": "Example",
+  "website": "https://example.com",
+  "linkedin_url": "https://www.linkedin.com/company/example",
+  "confidence_score": 0.9
+}
+```
+
+If the extractor cannot reach a confidence threshold for a field, that field is returned as `null` rather than guessed.
+
+## Extraction Logic
+
+The pipeline uses five layers:
+
+1. Structured metadata
+   - `og:site_name`
+   - `og:title`
+   - JSON-LD `Organization`
+   - `meta[name="author"]`
+   - `sameAs` and organization URLs
+2. Link analysis
+   - scans all anchor tags
+   - prefers LinkedIn company links
+   - picks external websites while ignoring social and tracking domains
+3. Content heuristics
+   - looks for patterns like `Company:`, `About:`, `We are`, `Founded by`
+   - checks headings and bold text
+4. Domain inference
+   - infers a company name from the URL domain when the page looks like a company site
+5. Reddit/forum handling
+   - relies on the document order of outbound links so post-body links are preferred
+   - does not crawl additional pages
+
+## Confidence Policy
+
+- `company_name` is accepted from strong metadata, heading, content, or corroborated domain inference.
+- `website` is accepted from external links or strong source-domain inference.
+- `linkedin_url` is accepted only from explicit company-oriented LinkedIn signals.
+- The final `confidence_score` is capped at `1.0`.
