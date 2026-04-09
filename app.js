@@ -71,7 +71,7 @@ function escapeCSV(value) {
 }
 
 function render() {
-  els.rowCount.textContent = `${state.rows.length} rows Â· ${state.headers.length} columns`;
+  els.rowCount.textContent = `${state.rows.length} rows · ${state.headers.length} columns`;
   els.columnSelect.innerHTML = state.headers
     .map((h, i) => `<option value="${i}">${h || `Column ${i + 1}`}</option>`)
     .join("");
