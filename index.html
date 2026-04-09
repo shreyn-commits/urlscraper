@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CSV AI Spreadsheet</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">CSV workspace</p>
+          <h1>Load CSVs, edit cells, and run AI prompts per column.</h1>
+          <p class="lede">
+            A lightweight spreadsheet for quick CSV work with OpenAI or Claude
+            support through a local API proxy.
+          </p>
+        </div>
+        <div class="controls">
+          <label class="field">
+            <span>Provider</span>
+            <select id="provider">
+              <option value="openai">OpenAI</option>
+              <option value="claude">Claude</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Model</span>
+            <input id="model" placeholder="gpt-4.1-mini or claude-3-5-sonnet-20241022" />
+          </label>
+          <label class="field">
+            <span>API key</span>
+            <input id="apiKey" type="password" placeholder="Keep this local" />
+          </label>
+          <label class="field grow">
+            <span>Prompt for selected column</span>
+            <textarea id="prompt" rows="3" placeholder="Summarize each cell, extract entities, classify sentiment, etc."></textarea>
+          </label>
+          <div class="buttons">
+            <input id="csvFile" type="file" accept=".csv,text/csv" />
+            <button id="exportBtn">Export CSV</button>
+            <button id="runBtn" class="primary">Run on Selected Column</button>
+          </div>
+          <label class="field">
+            <span>Selected column</span>
+            <select id="columnSelect"></select>
+          </label>
+        </div>
+      </section>
+
+      <section class="grid-wrap">
+        <div class="statusbar">
+          <span id="status">Load a CSV to begin.</span>
+          <span id="rowCount"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="sheet"></table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

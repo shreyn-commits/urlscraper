@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light;
+  --bg: #0f172a;
+  --panel: #111827;
+  --panel-2: #1f2937;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #38bdf8;
+  --accent-2: #22c55e;
+  --line: rgba(255, 255, 255, 0.08);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: radial-gradient(circle at top, #1e293b, var(--bg) 55%);
+  color: var(--text);
+}
+.shell { max-width: 1400px; margin: 0 auto; padding: 32px; }
+.hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: start; }
+.eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-size: 12px; }
+h1 { margin: 0; font-size: clamp(32px, 4vw, 56px); line-height: 1.05; }
+.lede { color: var(--muted); max-width: 60ch; }
+.controls, .grid-wrap {
+  background: rgba(17, 24, 39, 0.75);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 18px;
+  backdrop-filter: blur(10px);
+}
+.controls { display: grid; gap: 12px; }
+.field { display: grid; gap: 8px; }
+.field span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+input, select, textarea, button {
+  font: inherit;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 12px 14px;
+}
+textarea { resize: vertical; }
+.buttons { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button { cursor: pointer; }
+.primary { background: linear-gradient(135deg, var(--accent), #6366f1); border: none; color: #fff; }
+.grow { grid-column: 1 / -1; }
+.statusbar { display: flex; justify-content: space-between; color: var(--muted); margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+.table-wrap { overflow: auto; border-radius: 16px; border: 1px solid var(--line); }
+table { border-collapse: collapse; width: 100%; min-width: 800px; background: rgba(15, 23, 42, 0.6); }
+th, td { border: 1px solid var(--line); padding: 0; }
+th input, td input {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 12px;
+}
+th { position: sticky; top: 0; background: #0b1220; z-index: 1; }
+td { background: rgba(255,255,255,0.01); }
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; }
+  .shell { padding: 18px; }
+}
