@@ -2,6 +2,8 @@
 
 Async, URL-based company extraction with layered heuristics for publicly accessible pages.
 
+The web UI lets you paste a public URL, scrape it, preview the generated CSV, and download the file directly from the browser.
+
 ## What it extracts
 
 - `company_name`
@@ -11,6 +13,8 @@ Async, URL-based company extraction with layered heuristics for publicly accessi
 ## Project Structure
 
 ```text
+index.html
+api/scrape.js
 main.py
 pyproject.toml
 requirements.txt
@@ -50,6 +54,16 @@ Batch from CSV:
 ```bash
 python main.py --input urls.csv --output results.json
 ```
+
+## Web UI
+
+Open the deployed Vercel URL, paste a public URL into the form, and click `Scrape and build CSV`.
+
+The page will:
+
+- call the serverless scraper endpoint
+- preview the CSV rows in the browser
+- provide a downloadable CSV file
 
 ## Input Formats
 

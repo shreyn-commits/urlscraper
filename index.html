@@ -3,17 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="URL Scraper extracts company_name, website, and linkedin_url from public pages." />
+    <meta
+      name="description"
+      content="URL Scraper extracts company_name, website, and linkedin_url from a public URL and exports CSV."
+    />
     <title>URL Scraper</title>
     <style>
       :root {
         color-scheme: light;
-        --bg: #f6f3ea;
-        --panel: rgba(255, 255, 255, 0.8);
+        --bg: #f7f2e8;
+        --card: rgba(255, 255, 255, 0.84);
+        --card-strong: rgba(255, 255, 255, 0.96);
         --text: #1f2937;
-        --muted: #5b6472;
+        --muted: #606776;
         --accent: #0f766e;
-        --accent-2: #0b5d54;
+        --accent-2: #115e59;
         --border: rgba(31, 41, 55, 0.12);
         --shadow: 0 24px 80px rgba(15, 118, 110, 0.12);
       }
@@ -32,32 +36,41 @@
         font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: var(--text);
         background:
-          radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 34%),
-          radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.07), transparent 28%),
-          linear-gradient(180deg, #fffdf8 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 28%),
+          radial-gradient(circle at bottom right, rgba(17, 94, 89, 0.08), transparent 28%),
+          linear-gradient(180deg, #fffdf9 0%, var(--bg) 100%);
       }
 
       .wrap {
         min-height: 100vh;
+        padding: 32px;
         display: grid;
         place-items: center;
-        padding: 32px;
       }
 
-      .card {
-        width: min(760px, 100%);
-        background: var(--panel);
+      .shell {
+        width: min(1100px, 100%);
+        display: grid;
+        gap: 18px;
+      }
+
+      .hero,
+      .workspace {
         border: 1px solid var(--border);
         border-radius: 28px;
+        background: var(--card);
         box-shadow: var(--shadow);
-        backdrop-filter: blur(12px);
-        padding: 40px;
+        backdrop-filter: blur(14px);
+      }
+
+      .hero {
+        padding: 34px 34px 28px;
       }
 
       .eyebrow {
         display: inline-flex;
-        align-items: center;
         gap: 8px;
+        align-items: center;
         font-size: 12px;
         font-weight: 700;
         letter-spacing: 0.12em;
@@ -76,83 +89,190 @@
 
       h1 {
         margin: 18px 0 12px;
-        font-size: clamp(2.4rem, 6vw, 4.6rem);
+        font-size: clamp(2.4rem, 6vw, 4.8rem);
         line-height: 0.95;
-        letter-spacing: -0.05em;
+        letter-spacing: -0.06em;
       }
 
-      p {
+      .lede {
         margin: 0;
+        max-width: 68ch;
         color: var(--muted);
-        font-size: 1.05rem;
+        font-size: 1.06rem;
         line-height: 1.7;
       }
 
-      .grid {
-        margin-top: 28px;
+      .workspace {
+        padding: 24px;
+      }
+
+      .form {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 14px;
       }
 
-      .pill {
-        padding: 16px 18px;
+      label {
+        font-weight: 700;
+        font-size: 0.95rem;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 88px;
+        resize: vertical;
         border-radius: 18px;
         border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.7);
-      }
-
-      .pill strong {
-        display: block;
-        font-size: 0.92rem;
-        margin-bottom: 6px;
-      }
-
-      .pill span {
-        display: block;
-        color: var(--muted);
-        font-size: 0.92rem;
+        background: var(--card-strong);
+        color: var(--text);
+        padding: 16px 18px;
+        font: inherit;
         line-height: 1.5;
+        outline: none;
       }
 
-      .footer {
-        margin-top: 28px;
+      textarea:focus {
+        border-color: rgba(15, 118, 110, 0.55);
+        box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+      }
+
+      .actions {
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
         align-items: center;
-        justify-content: space-between;
       }
 
-      .button {
+      .button,
+      .button-secondary {
+        border: 0;
+        cursor: pointer;
+        border-radius: 999px;
+        padding: 13px 18px;
+        font: inherit;
+        font-weight: 700;
+        text-decoration: none;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 13px 18px;
-        border-radius: 999px;
+      }
+
+      .button {
         background: linear-gradient(135deg, var(--accent), var(--accent-2));
         color: white;
-        text-decoration: none;
-        font-weight: 700;
         box-shadow: 0 10px 24px rgba(15, 118, 110, 0.24);
       }
 
-      .meta {
-        font-size: 0.92rem;
+      .button-secondary {
+        color: var(--accent-2);
+        background: rgba(15, 118, 110, 0.08);
+      }
+
+      .status {
+        min-height: 22px;
+        font-size: 0.95rem;
         color: var(--muted);
       }
 
-      @media (max-width: 720px) {
-        .card {
-          padding: 28px 22px;
-        }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 20px;
+      }
 
-        .grid {
+      .pill {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid var(--border);
+      }
+
+      .pill strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .output {
+        margin-top: 18px;
+        display: grid;
+        gap: 16px;
+      }
+
+      .panel {
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.82);
+        overflow: hidden;
+      }
+
+      .panel h2 {
+        margin: 0;
+        padding: 16px 18px 0;
+        font-size: 1rem;
+      }
+
+      .panel .content {
+        padding: 16px 18px 18px;
+      }
+
+      .download-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 12px 10px;
+        border-bottom: 1px solid rgba(31, 41, 55, 0.08);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .empty {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .small {
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      @media (max-width: 860px) {
+        .meta-grid {
           grid-template-columns: 1fr;
         }
+      }
 
-        .footer {
-          flex-direction: column;
+      @media (max-width: 720px) {
+        .wrap {
+          padding: 18px;
+        }
+
+        .hero,
+        .workspace {
+          padding-left: 20px;
+          padding-right: 20px;
+          border-radius: 22px;
+        }
+
+        .download-row {
           align-items: flex-start;
         }
       }
@@ -160,37 +280,144 @@
   </head>
   <body>
     <main class="wrap">
-      <section class="card" aria-label="URL Scraper landing page">
-        <div class="eyebrow">Public URL extraction</div>
-        <h1>URL Scraper</h1>
-        <p>
-          A lightweight async scraper for extracting <strong>company_name</strong>,
-          <strong>website</strong>, and <strong>linkedin_url</strong> from public pages,
-          directories, forums, and social threads.
-        </p>
+      <div class="shell">
+        <section class="hero">
+          <div class="eyebrow">Public URL extraction</div>
+          <h1>URL Scraper</h1>
+          <p class="lede">
+            Paste a public URL, extract <strong>company_name</strong>, <strong>website</strong>, and
+            <strong>linkedin_url</strong>, then preview and download the result as a CSV.
+          </p>
+          <div class="meta-grid">
+            <div class="pill">
+              <strong>Async fetch</strong>
+              <span class="small">Handles a single URL request from the browser through the API.</span>
+            </div>
+            <div class="pill">
+              <strong>Layered extraction</strong>
+              <span class="small">Metadata, links, text patterns, and domain inference.</span>
+            </div>
+            <div class="pill">
+              <strong>Strict output</strong>
+              <span class="small">Returns null instead of guessing when confidence is low.</span>
+            </div>
+          </div>
+        </section>
 
-        <div class="grid">
-          <div class="pill">
-            <strong>Async fetch</strong>
-            <span>Concurrent HTTP scraping with retries and timeout handling.</span>
-          </div>
-          <div class="pill">
-            <strong>Layered extraction</strong>
-            <span>Metadata, link analysis, text heuristics, and domain inference.</span>
-          </div>
-          <div class="pill">
-            <strong>Strict output</strong>
-            <span>Returns null instead of guessing when confidence is low.</span>
-          </div>
-        </div>
+        <section class="workspace">
+          <form class="form" id="scrape-form">
+            <div>
+              <label for="url-input">Public URL</label>
+              <textarea
+                id="url-input"
+                name="url"
+                placeholder="https://example.com"
+                spellcheck="false"
+              >https://www.reddit.com/r/startups/comments/xyz</textarea>
+            </div>
+            <div class="actions">
+              <button class="button" type="submit">Scrape and build CSV</button>
+              <a class="button-secondary" id="download-link" href="#" download="results.csv" aria-disabled="true">Download CSV</a>
+            </div>
+            <div class="status" id="status">Ready.</div>
+          </form>
 
-        <div class="footer">
-          <a class="button" href="https://github.com/shreyn-commits/urlscraper" target="_blank" rel="noreferrer">
-            View source on GitHub
-          </a>
-          <div class="meta">Built for publicly accessible pages only. No crawling, no login bypass.</div>
-        </div>
-      </section>
+          <div class="output">
+            <section class="panel">
+              <h2>CSV preview</h2>
+              <div class="content" id="preview">
+                <div class="empty">Submit a URL to see the CSV preview here.</div>
+              </div>
+            </section>
+            <section class="panel">
+              <h2>Raw CSV</h2>
+              <div class="content">
+                <pre id="csv-output" style="margin: 0; white-space: pre-wrap; overflow-x: auto;" class="small"></pre>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
     </main>
+
+    <script>
+      const form = document.getElementById("scrape-form");
+      const input = document.getElementById("url-input");
+      const statusEl = document.getElementById("status");
+      const previewEl = document.getElementById("preview");
+      const csvOutputEl = document.getElementById("csv-output");
+      const downloadLink = document.getElementById("download-link");
+
+      let lastObjectUrl = null;
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function renderPreview(row) {
+        const fields = ["url", "company_name", "website", "linkedin_url", "confidence_score"];
+        const rows = fields
+          .map(
+            (field) => `
+              <tr>
+                <th>${escapeHtml(field)}</th>
+                <td>${escapeHtml(row[field] ?? "")}</td>
+              </tr>`
+          )
+          .join("");
+
+        previewEl.innerHTML = `<table>${rows}</table>`;
+      }
+
+      function setDownload(csv) {
+        if (lastObjectUrl) {
+          URL.revokeObjectURL(lastObjectUrl);
+        }
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        lastObjectUrl = URL.createObjectURL(blob);
+        downloadLink.href = lastObjectUrl;
+        downloadLink.setAttribute("aria-disabled", "false");
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const url = input.value.trim();
+
+        if (!url) {
+          statusEl.textContent = "Please enter a URL first.";
+          return;
+        }
+
+        statusEl.textContent = "Scraping public page...";
+        previewEl.innerHTML = '<div class="empty">Working...</div>';
+        csvOutputEl.textContent = "";
+
+        try {
+          const response = await fetch("/api/scrape", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || "Scrape failed");
+          }
+
+          renderPreview(payload.rows[0]);
+          csvOutputEl.textContent = payload.csv;
+          setDownload(payload.csv);
+          statusEl.textContent = `Done. Confidence ${payload.rows[0].confidence_score}.`;
+        } catch (error) {
+          previewEl.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+          statusEl.textContent = "Scrape failed.";
+        }
+      });
+    </script>
   </body>
 </html>
