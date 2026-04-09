@@ -4,10 +4,13 @@
     { "src": "index.html", "use": "@vercel/static" },
     { "src": "styles.css", "use": "@vercel/static" },
     { "src": "app.js", "use": "@vercel/static" },
-    { "src": "api/run-column.js", "use": "@vercel/node" }
+    { "src": "assets/dfm-logo.png", "use": "@vercel/static" },
+    { "src": "api/run-ai.js", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/api/run-column", "dest": "/api/run-column.js" },
+    { "src": "/api/run-ai", "dest": "/api/run-ai.js" },
+    { "src": "/api/run-column", "dest": "/api/run-ai.js" },
+    { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

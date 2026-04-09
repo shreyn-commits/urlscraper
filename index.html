@@ -12,56 +12,105 @@
         <div class="brand">
           <img class="brand-mark" src="/assets/dfm-logo.png" alt="DFM logo" />
           <div>
-            <p class="eyebrow">CSV workspace</p>
-            <h1>Load CSVs, edit cells, and run AI prompts per column.</h1>
+            <p class="eyebrow">AI spreadsheet</p>
+            <h1>Sheets-style editing with formulas, tabs, and row or column AI runs.</h1>
           </div>
         </div>
         <p class="lede">
-          A minimal spreadsheet for quick CSV work with OpenAI or Claude support
-          through a local API proxy.
+          A spreadsheet workspace inspired by Google Sheets. Load CSVs, work with
+          formulas, manage multiple sheets, and run custom prompts on a cell, a
+          range, a row, or a column through OpenAI or Claude.
         </p>
       </header>
 
-      <section class="hero">
-        <div class="controls">
-          <label class="field">
-            <span>Provider</span>
-            <select id="provider">
-              <option value="openai">OpenAI</option>
-              <option value="claude">Claude</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Model</span>
-            <input id="model" placeholder="gpt-4.1-mini or claude-3-5-sonnet-20241022" />
-          </label>
-          <label class="field">
-            <span>API key</span>
-            <input id="apiKey" type="password" placeholder="Keep this local" />
-          </label>
-          <label class="field grow">
-            <span>Prompt for selected column</span>
-            <textarea id="prompt" rows="3" placeholder="Summarize each cell, extract entities, classify sentiment, etc."></textarea>
-          </label>
-          <div class="buttons">
-            <input id="csvFile" type="file" accept=".csv,text/csv" />
-            <button id="exportBtn">Export CSV</button>
-            <button id="runBtn" class="primary">Run on Selected Column</button>
+      <section class="workspace">
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <label class="upload-chip">
+              <input id="csvFile" type="file" accept=".csv,text/csv" />
+              <span>Import CSV</span>
+            </label>
+            <button id="exportBtn" type="button">Export CSV</button>
+            <button id="addRowBtn" type="button">Add Row</button>
+            <button id="addColBtn" type="button">Add Column</button>
+            <button id="deleteRowBtn" type="button">Delete Row</button>
+            <button id="deleteColBtn" type="button">Delete Column</button>
+            <button id="newSheetBtn" type="button">New Sheet</button>
+            <button id="renameSheetBtn" type="button">Rename Sheet</button>
           </div>
-          <label class="field">
-            <span>Selected column</span>
-            <select id="columnSelect"></select>
-          </label>
+          <div class="selection-summary" id="selectionSummary">A1 selected</div>
         </div>
-      </section>
 
-      <section class="grid-wrap">
-        <div class="statusbar">
-          <span id="status">Load a CSV to begin.</span>
-          <span id="rowCount"></span>
+        <div class="formula-bar">
+          <div class="name-box" id="activeCellName">A1</div>
+          <input
+            id="formulaInput"
+            type="text"
+            placeholder="Enter a value or formula like =A1+B1 or =SUM(A1:A10)"
+          />
         </div>
-        <div class="table-wrap">
-          <table id="sheet"></table>
+
+        <div class="main-layout">
+          <section class="grid-wrap">
+            <div class="statusbar">
+              <span id="status">Ready.</span>
+              <span id="sheetMeta"></span>
+            </div>
+            <div class="table-wrap">
+              <table id="sheet"></table>
+            </div>
+            <div class="sheet-tabs" id="sheetTabs"></div>
+          </section>
+
+          <aside class="ai-panel">
+            <div class="panel-intro">
+              <p class="eyebrow">AI actions</p>
+              <h2>Run prompts on spreadsheet data.</h2>
+            </div>
+
+            <label class="field">
+              <span>Provider</span>
+              <select id="provider">
+                <option value="openai">OpenAI</option>
+                <option value="claude">Claude</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Model</span>
+              <input id="model" placeholder="gpt-4.1-mini or claude-3-5-sonnet-20241022" />
+            </label>
+
+            <label class="field">
+              <span>API key</span>
+              <input id="apiKey" type="password" placeholder="Or use server env vars" />
+            </label>
+
+            <label class="field">
+              <span>Scope</span>
+              <select id="aiScope">
+                <option value="cell">Active cell</option>
+                <option value="selection">Each cell in selection</option>
+                <option value="row">Each selected row</option>
+                <option value="column">Each cell in selected column(s)</option>
+              </select>
+            </label>
+
+            <label class="field grow">
+              <span>Prompt</span>
+              <textarea
+                id="prompt"
+                rows="7"
+                placeholder="Examples: classify sentiment, extract entities, summarize the row, normalize the value, or transform text into JSON."
+              ></textarea>
+            </label>
+
+            <button id="runAiBtn" class="primary" type="button">Run AI</button>
+            <p class="ai-note">
+              Row runs write one result column to the right. Cell and range runs
+              write results to the right of the selected area so your source data stays intact.
+            </p>
+          </aside>
         </div>
       </section>
     </main>

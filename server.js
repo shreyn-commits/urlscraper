@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runAiRequest } from "./lib/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,7 @@ const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
   ".svg": "image/svg+xml; charset=utf-8"
 };
 
@@ -51,60 +53,6 @@ async function serveStatic(req, res) {
   }
 }
 
-async function callOpenAI({ apiKey, model, prompt, text }) {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: model || "gpt-4.1-mini",
-      input: [
-        {
-          role: "user",
-          content: [{ type: "input_text", text: `${prompt}\n\nData:\n${text}` }]
-        }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI error: ${response.status} ${await response.text()}`);
-  }
-
-  const json = await response.json();
-  return json.output_text || "";
-}
-
-async function callClaude({ apiKey, model, prompt, text }) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: model || "claude-3-5-sonnet-20241022",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: `${prompt}\n\nData:\n${text}`
-        }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Claude error: ${response.status} ${await response.text()}`);
-  }
-
-  const json = await response.json();
-  return (json.content || []).map((item) => item.text || "").join("");
-}
-
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -116,20 +64,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === "/api/run-column" && req.method === "POST") {
+  if ((req.url === "/api/run-column" || req.url === "/api/run-ai") && req.method === "POST") {
     try {
       const body = await readBody(req);
-      const { provider, apiKey, model, prompt, text } = body;
-      if (!provider || !apiKey || !prompt) {
-        send(res, 400, { error: "provider, apiKey, and prompt are required" });
-        return;
-      }
-
-      const result =
-        provider === "claude"
-          ? await callClaude({ apiKey, model, prompt, text })
-          : await callOpenAI({ apiKey, model, prompt, text });
-
+      const result = await runAiRequest(body);
       send(res, 200, { result });
     } catch (error) {
       send(res, 500, { error: error.message || "Unknown error" });
@@ -141,5 +79,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`CSV AI Spreadsheet running on http://localhost:${port}`);
+  console.log(`AI Spreadsheet running on http://localhost:${port}`);
 });
