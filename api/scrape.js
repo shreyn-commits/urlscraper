@@ -98,6 +98,37 @@ function normalizeWebsite(rawUrl) {
   }
 }
 
+function buildFetchCandidates(rawUrl) {
+  const candidates = [];
+  const normalized = normalizeUrl(rawUrl);
+  const withHttps = /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`;
+
+  try {
+    const url = new URL(withHttps);
+    candidates.push(url.toString());
+
+    if (url.hostname === "reddit.com" || url.hostname === "www.reddit.com") {
+      const oldReddit = new URL(url.toString());
+      oldReddit.hostname = "old.reddit.com";
+      candidates.push(oldReddit.toString());
+    }
+
+    if (url.hostname.startsWith("www.")) {
+      const noWww = new URL(url.toString());
+      noWww.hostname = url.hostname.replace(/^www\./, "");
+      candidates.push(noWww.toString());
+    } else if (!url.hostname.startsWith("www.") && !url.hostname.startsWith("old.")) {
+      const withWww = new URL(url.toString());
+      withWww.hostname = `www.${url.hostname}`;
+      candidates.push(withWww.toString());
+    }
+  } catch {
+    candidates.push(withHttps);
+  }
+
+  return [...new Set(candidates)];
+}
+
 function isTrackingOrSocial(rawUrl) {
   const domain = domainFromUrl(rawUrl);
   return !domain || SOCIAL_DOMAINS.has(domain) || domain.includes("tracking") || domain.includes("doubleclick");
@@ -340,18 +371,41 @@ function computeConfidence({ companyName, website, linkedinUrl, companySource })
 
 async function scrapeUrl(url) {
   const normalizedInput = normalizeUrl(url);
-  const response = await fetch(normalizedInput, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.8",
-    },
-    redirect: "follow",
-  });
+  const candidates = buildFetchCandidates(normalizedInput);
+  let response = null;
+  let lastStatus = null;
 
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+  for (const candidate of candidates) {
+    response = await fetch(candidate, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.8",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+        Referer: new URL(candidate).origin,
+        "Upgrade-Insecure-Requests": "1",
+      },
+      redirect: "follow",
+    });
+
+    if (response.ok) {
+      break;
+    }
+
+    lastStatus = response.status;
+    if (![403, 404, 429].includes(response.status)) {
+      break;
+    }
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(
+      lastStatus === 403
+        ? "The target site blocked the scrape request with a 403. Try a more public URL or a company homepage."
+        : `Request failed with status ${lastStatus || "unknown"}`
+    );
   }
 
   const contentType = response.headers.get("content-type") || "";
