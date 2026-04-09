@@ -137,6 +137,27 @@
       </div>
     </div>
 
+    <div class="modal-backdrop hidden" id="jsonViewerModal">
+      <div class="modal-card json-viewer" role="dialog" aria-modal="true" aria-labelledby="jsonViewerTitle">
+        <div class="modal-header">
+          <div>
+            <p class="modal-eyebrow">AI Result</p>
+            <h2 id="jsonViewerTitle">JSON Output</h2>
+            <p class="modal-copy">
+              This is the raw model response. Fields from this object are split into separate columns automatically.
+            </p>
+          </div>
+          <button id="closeJsonViewerBtn" type="button" class="ghost-btn">Close</button>
+        </div>
+
+        <pre id="jsonViewerBody" class="json-viewer-body"></pre>
+
+        <div class="modal-actions">
+          <button id="copyJsonBtn" type="button" class="ghost-btn">Copy JSON</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/main.js"></script>
   </body>
 </html>

@@ -701,6 +701,10 @@ table {
   background: rgba(255, 240, 227, 0.95);
 }
 
+.generated-column-header {
+  background: rgba(255, 248, 240, 0.96);
+}
+
 .column-edit-btn {
   border: 0;
   padding: 0;
@@ -714,6 +718,15 @@ table {
 .column-edit-btn:hover {
   transform: none;
   text-decoration: underline;
+}
+
+.column-output-label {
+  margin-top: 4px;
+  color: #8f8175;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  max-width: 110px;
 }
 
 .row-header {
@@ -761,7 +774,7 @@ table {
 
 .ai-cell-wrap {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: stretch;
 }
 
@@ -780,6 +793,23 @@ table {
 .cell-run-btn:hover {
   transform: none;
   background: rgba(255, 122, 26, 0.18);
+}
+
+.cell-json-btn {
+  border: 0;
+  border-left: 1px solid rgba(17, 17, 17, 0.06);
+  border-radius: 0;
+  min-width: 54px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #7a6f64;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cell-json-btn:hover {
+  transform: none;
+  background: rgba(17, 17, 17, 0.04);
 }
 
 .sheet-footer {
@@ -907,6 +937,25 @@ table {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 18px;
+}
+
+.json-viewer {
+  width: min(760px, 100%);
+}
+
+.json-viewer-body {
+  margin: 0;
+  max-height: 52vh;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  background: #101010;
+  color: #f4efe8;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .slash-menu {

@@ -19,6 +19,12 @@ const state = {
     mode: "create",
     columnIndex: null,
     insertAt: null
+  },
+  jsonViewer: {
+    open: false,
+    title: "",
+    raw: "",
+    parsed: null
   }
 };
 
@@ -57,7 +63,12 @@ const els = {
   aiColumnModalTitle: document.getElementById("aiColumnModalTitle"),
   closeAiModalBtn: document.getElementById("closeAiModalBtn"),
   cancelAiModalBtn: document.getElementById("cancelAiModalBtn"),
-  saveAiColumnBtn: document.getElementById("saveAiColumnBtn")
+  saveAiColumnBtn: document.getElementById("saveAiColumnBtn"),
+  jsonViewerModal: document.getElementById("jsonViewerModal"),
+  jsonViewerTitle: document.getElementById("jsonViewerTitle"),
+  jsonViewerBody: document.getElementById("jsonViewerBody"),
+  closeJsonViewerBtn: document.getElementById("closeJsonViewerBtn"),
+  copyJsonBtn: document.getElementById("copyJsonBtn")
 };
 
 function createProviderState() {
@@ -85,7 +96,9 @@ function createSheet(name, rows, cols) {
     id: `sheet-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,
     cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => "")),
-    aiColumns: {}
+    aiColumns: {},
+    columnLabels: {},
+    aiResults: {}
   };
 }
 
@@ -102,24 +115,114 @@ function normalizeAiColumns(sheet) {
   return sheet.aiColumns;
 }
 
-function shiftAiColumnsOnInsert(sheet, insertedAt) {
+function normalizeSheetMetadata(sheet) {
+  if (!sheet.columnLabels) sheet.columnLabels = {};
+  if (!sheet.aiResults) sheet.aiResults = {};
+  return sheet;
+}
+
+function shiftIndexMap(indexMap, insertedAt) {
   const next = {};
-  for (const [rawCol, config] of Object.entries(normalizeAiColumns(sheet))) {
+  for (const [rawCol, value] of Object.entries(indexMap || {})) {
+    const col = Number(rawCol);
+    next[col >= insertedAt ? col + 1 : col] = value;
+  }
+  return next;
+}
+
+function shiftIndexMapForDelete(indexMap, startCol, endCol) {
+  const width = endCol - startCol + 1;
+  const next = {};
+  for (const [rawCol, value] of Object.entries(indexMap || {})) {
+    const col = Number(rawCol);
+    if (col < startCol) next[col] = value;
+    if (col > endCol) next[col - width] = value;
+  }
+  return next;
+}
+
+function shiftAiResultKeysOnRowInsert(sheet, insertedAt) {
+  const next = {};
+  for (const [key, value] of Object.entries(sheet.aiResults || {})) {
+    const [rowText, colText] = key.split(":");
+    const row = Number(rowText);
+    const col = Number(colText);
+    const nextRow = row >= insertedAt ? row + 1 : row;
+    next[`${nextRow}:${col}`] = value;
+  }
+  sheet.aiResults = next;
+}
+
+function shiftAiResultKeysOnRowDelete(sheet, startRow, endRow) {
+  const width = endRow - startRow + 1;
+  const next = {};
+  for (const [key, value] of Object.entries(sheet.aiResults || {})) {
+    const [rowText, colText] = key.split(":");
+    const row = Number(rowText);
+    const col = Number(colText);
+    if (row < startRow) next[`${row}:${col}`] = value;
+    if (row > endRow) next[`${row - width}:${col}`] = value;
+  }
+  sheet.aiResults = next;
+}
+
+function shiftAiResultKeysOnColInsert(sheet, insertedAt) {
+  const next = {};
+  for (const [key, value] of Object.entries(sheet.aiResults || {})) {
+    const [rowText, colText] = key.split(":");
+    const row = Number(rowText);
+    const col = Number(colText);
+    const nextCol = col >= insertedAt ? col + 1 : col;
+    next[`${row}:${nextCol}`] = value;
+  }
+  sheet.aiResults = next;
+}
+
+function shiftAiResultKeysOnColDelete(sheet, startCol, endCol) {
+  const width = endCol - startCol + 1;
+  const next = {};
+  for (const [key, value] of Object.entries(sheet.aiResults || {})) {
+    const [rowText, colText] = key.split(":");
+    const row = Number(rowText);
+    const col = Number(colText);
+    if (col < startCol) next[`${row}:${col}`] = value;
+    if (col > endCol) next[`${row}:${col - width}`] = value;
+  }
+  sheet.aiResults = next;
+}
+
+function shiftAiColumnsOnInsert(sheet, insertedAt) {
+  const normalized = normalizeAiColumns(sheet);
+  const next = {};
+  for (const [rawCol, config] of Object.entries(normalized)) {
     const col = Number(rawCol);
     next[col >= insertedAt ? col + 1 : col] = config;
   }
   sheet.aiColumns = next;
+  sheet.columnLabels = shiftIndexMap(sheet.columnLabels, insertedAt);
+  for (const config of Object.values(sheet.aiColumns)) {
+    if (config.outputColumns) {
+      config.outputColumns = shiftIndexMap(config.outputColumns, insertedAt);
+    }
+  }
 }
 
 function shiftAiColumnsOnDelete(sheet, startCol, endCol) {
   const width = endCol - startCol + 1;
+  const normalized = normalizeAiColumns(sheet);
   const next = {};
-  for (const [rawCol, config] of Object.entries(normalizeAiColumns(sheet))) {
+  for (const [rawCol, config] of Object.entries(normalized)) {
     const col = Number(rawCol);
     if (col < startCol) next[col] = config;
     if (col > endCol) next[col - width] = config;
   }
   sheet.aiColumns = next;
+  sheet.columnLabels = shiftIndexMapForDelete(sheet.columnLabels, startCol, endCol);
+  for (const config of Object.values(sheet.aiColumns)) {
+    if (config.outputColumns) {
+      config.outputColumns = shiftIndexMapForDelete(config.outputColumns, startCol, endCol);
+    }
+  }
 }
 
 function getSelectionBounds() {
@@ -185,6 +288,84 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function stripJsonFence(text) {
+  const trimmed = String(text ?? "").trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function tryParseJson(text) {
+  if (text && typeof text === "object") return text;
+  const source = stripJsonFence(text);
+  if (!source) return null;
+  try {
+    return JSON.parse(source);
+  } catch {
+    return null;
+  }
+}
+
+function flattenJson(value, prefix = "", output = []) {
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      output.push({ path: prefix || "value", value: [] });
+      return output;
+    }
+    value.forEach((item, index) => {
+      flattenJson(item, prefix ? `${prefix}.${index}` : String(index), output);
+    });
+    return output;
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value);
+    if (!entries.length) {
+      output.push({ path: prefix || "value", value: {} });
+      return output;
+    }
+    for (const [key, child] of entries) {
+      flattenJson(child, prefix ? `${prefix}.${key}` : key, output);
+    }
+    return output;
+  }
+
+  output.push({ path: prefix || "value", value });
+  return output;
+}
+
+function stringifyCellValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+function summarizeJson(parsed) {
+  if (!parsed || typeof parsed !== "object") return stringifyCellValue(parsed);
+  const priorityKeys = ["result", "answer", "value", "output", "text", "name", "title", "decision"];
+  for (const key of priorityKeys) {
+    if (Object.prototype.hasOwnProperty.call(parsed, key)) {
+      const candidate = parsed[key];
+      if (candidate !== null && candidate !== undefined && typeof candidate !== "object") {
+        return stringifyCellValue(candidate);
+      }
+    }
+  }
+  const firstLeaf = flattenJson(parsed).find((item) => item.value !== null && typeof item.value !== "object");
+  return firstLeaf ? stringifyCellValue(firstLeaf.value) : JSON.stringify(parsed);
+}
+
+function formatJsonPretty(raw, parsed) {
+  if (parsed && typeof parsed === "object") {
+    try {
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return String(raw ?? "");
+    }
+  }
+  return String(raw ?? "");
 }
 
 function parseCellRef(reference) {
@@ -309,6 +490,68 @@ function getColumnDisplayName(sheet, col) {
 function getColumnPromptKey(sheet, col) {
   const name = getColumnDisplayName(sheet, col);
   return /[{}]/.test(name) ? columnLabel(col) : name;
+}
+
+function getAiResultKey(row, col) {
+  return `${row}:${col}`;
+}
+
+function getAiCellRecord(sheet, row, col) {
+  normalizeSheetMetadata(sheet);
+  return sheet.aiResults[getAiResultKey(row, col)] || null;
+}
+
+function setAiCellRecord(sheet, row, col, record) {
+  normalizeSheetMetadata(sheet);
+  sheet.aiResults[getAiResultKey(row, col)] = record;
+}
+
+function getOutputColumnLabel(config, path) {
+  return `${config.name} - ${path}`;
+}
+
+function getAiColumnEnd(sheet, aiCol) {
+  const config = normalizeAiColumns(sheet)[aiCol];
+  const outputColumns = Object.values(config?.outputColumns || {});
+  return outputColumns.length ? Math.max(aiCol, ...outputColumns) : aiCol;
+}
+
+function ensureOutputColumn(sheet, aiCol, path, displayLabel) {
+  const config = normalizeAiColumns(sheet)[aiCol];
+  if (!config) return null;
+
+  if (!config.outputColumns) config.outputColumns = {};
+  if (config.outputColumns[path] !== undefined) return config.outputColumns[path];
+
+  const insertAt = getAiColumnEnd(sheet, aiCol) + 1;
+  shiftAiResultKeysOnColInsert(sheet, insertAt);
+  shiftAiColumnsOnInsert(sheet, insertAt);
+  for (const row of sheet.cells) {
+    row.splice(insertAt, 0, "");
+  }
+
+  config.outputColumns[path] = insertAt;
+  sheet.columnLabels[insertAt] = displayLabel;
+  return insertAt;
+}
+
+function writeJsonOutputsToSheet(sheet, row, aiCol, config, parsed) {
+  const flatEntries = flattenJson(parsed);
+  const presentPaths = new Set();
+  for (const entry of flatEntries) {
+    const path = entry.path || "value";
+    const displayLabel = getOutputColumnLabel(config, path);
+    const outputCol = ensureOutputColumn(sheet, aiCol, path, displayLabel);
+    if (outputCol === null) continue;
+    setRawCell(sheet, row, outputCol, stringifyCellValue(entry.value));
+    presentPaths.add(path);
+  }
+
+  for (const [path, outputCol] of Object.entries(config.outputColumns || {})) {
+    if (!presentPaths.has(path)) {
+      setRawCell(sheet, row, outputCol, "");
+    }
+  }
 }
 
 function makeUniqueObjectKey(target, preferred, fallback) {
@@ -472,20 +715,29 @@ function renderTabs() {
 function renderSheet() {
   const sheet = getActiveSheet();
   normalizeAiColumns(sheet);
+  normalizeSheetMetadata(sheet);
   const cache = new Map();
   const bounds = getSelectionBounds();
   const size = getGridSize(sheet);
 
   const headerCells = Array.from({ length: size.cols }, (_, col) => {
     const aiConfig = sheet.aiColumns[col];
+    const columnLabelName = sheet.columnLabels[col];
     const classes = ["column-header"];
     if (col >= bounds.startCol && col <= bounds.endCol) classes.push("selected-header");
     if (aiConfig) classes.push("ai-column-header");
+    if (columnLabelName && !aiConfig) classes.push("generated-column-header");
 
+    const headerText = columnLabelName || aiConfig?.name || "";
     const headerInner = aiConfig
       ? `<div class="column-header-stack">
           <span class="column-header-label">${columnLabel(col)}</span>
-          <button class="column-edit-btn" data-edit-ai-col="${col}" type="button">${escapeHtml(aiConfig.name)}</button>
+          <button class="column-edit-btn" data-edit-ai-col="${col}" type="button">${escapeHtml(headerText)}</button>
+        </div>`
+      : columnLabelName
+      ? `<div class="column-header-stack">
+          <span class="column-header-label">${columnLabel(col)}</span>
+          <span class="column-output-label">${escapeHtml(headerText)}</span>
         </div>`
       : `<div class="column-header-stack">
           <span class="column-header-label">${columnLabel(col)}</span>
@@ -502,6 +754,7 @@ function renderSheet() {
       const raw = getRawCell(sheet, row, col);
       const display = getDisplayCell(sheet, row, col, cache);
       const aiConfig = sheet.aiColumns[col];
+      const aiRecord = aiConfig ? getAiCellRecord(sheet, row, col) : null;
       const isActive = row === state.selection.endRow && col === state.selection.endCol;
       const inSelection =
         row >= bounds.startRow && row <= bounds.endRow && col >= bounds.startCol && col <= bounds.endCol;
@@ -511,7 +764,7 @@ function renderSheet() {
       if (raw.startsWith("=")) classes.push("formula");
       if (aiConfig) classes.push("ai-cell");
 
-      const value = isActive ? raw : display;
+      const value = isActive ? raw : aiRecord?.displayValue || display;
       const inputMarkup = `
         <input
           data-cell-input="true"
@@ -524,6 +777,7 @@ function renderSheet() {
       const content = aiConfig
         ? `<div class="ai-cell-wrap">
             ${inputMarkup}
+            <button class="cell-json-btn" data-view-json-row="${row}" data-view-json-col="${col}" type="button">JSON</button>
             <button class="cell-run-btn" data-run-ai-row="${row}" data-run-ai-col="${col}" type="button">Run</button>
           </div>`
         : inputMarkup;
@@ -676,6 +930,7 @@ function insertRow() {
   const bounds = getSelectionBounds();
   const colCount = getGridSize(sheet).cols;
   sheet.cells.splice(bounds.endRow + 1, 0, Array.from({ length: colCount }, () => ""));
+  shiftAiResultKeysOnRowInsert(sheet, bounds.endRow + 1);
   selectCell(bounds.endRow + 1, bounds.startCol);
   setStatus("Row inserted.");
 }
@@ -684,6 +939,7 @@ function insertColumn() {
   const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
   const insertAt = bounds.endCol + 1;
+  shiftAiResultKeysOnColInsert(sheet, insertAt);
   shiftAiColumnsOnInsert(sheet, insertAt);
   for (const row of sheet.cells) {
     row.splice(insertAt, 0, "");
@@ -696,6 +952,7 @@ function deleteRow() {
   const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
   sheet.cells.splice(bounds.startRow, bounds.endRow - bounds.startRow + 1);
+  shiftAiResultKeysOnRowDelete(sheet, bounds.startRow, bounds.endRow);
   if (!sheet.cells.length) {
     sheet.cells = Array.from({ length: INITIAL_ROWS }, () => Array.from({ length: INITIAL_COLS }, () => ""));
   }
@@ -706,6 +963,7 @@ function deleteRow() {
 function deleteColumn() {
   const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
+  shiftAiResultKeysOnColDelete(sheet, bounds.startCol, bounds.endCol);
   shiftAiColumnsOnDelete(sheet, bounds.startCol, bounds.endCol);
   for (const row of sheet.cells) {
     row.splice(bounds.startCol, bounds.endCol - bounds.startCol + 1);
@@ -979,6 +1237,7 @@ function buildAiColumnConfig() {
     state.aiModal.mode === "edit" ? state.aiModal.columnIndex : state.aiModal.insertAt ?? getSelectionBounds().endCol + 1;
   const name = els.aiColumnName.value.trim() || `AI ${columnLabel(columnIndex)}`;
   const prompt = els.prompt.value.trim();
+  const existing = state.aiModal.mode === "edit" && columnIndex !== null ? getActiveSheet().aiColumns[columnIndex] : null;
 
   if (!prompt) {
     throw new Error("Add a prompt before saving the AI column.");
@@ -993,7 +1252,8 @@ function buildAiColumnConfig() {
     provider,
     model,
     prompt,
-    condition: els.conditionPrompt.value.trim()
+    condition: els.conditionPrompt.value.trim(),
+    outputColumns: existing?.outputColumns || {}
   };
 }
 
@@ -1006,6 +1266,28 @@ function closeAiColumnModal() {
   document.body.classList.remove("modal-open");
   hideSlashMenu("prompt");
   hideSlashMenu("conditionPrompt");
+}
+
+function openJsonViewer({ title, raw, parsed }) {
+  state.jsonViewer.open = true;
+  state.jsonViewer.title = title;
+  state.jsonViewer.raw = raw;
+  state.jsonViewer.parsed = parsed;
+  els.jsonViewerTitle.textContent = title;
+  els.jsonViewerBody.textContent = formatJsonPretty(raw, parsed);
+  els.jsonViewerModal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+}
+
+function closeJsonViewer() {
+  state.jsonViewer.open = false;
+  state.jsonViewer.title = "";
+  state.jsonViewer.raw = "";
+  state.jsonViewer.parsed = null;
+  els.jsonViewerModal.classList.add("hidden");
+  if (!state.aiModal.open) {
+    document.body.classList.remove("modal-open");
+  }
 }
 
 async function openAiColumnModal(mode = "create", columnIndex = null) {
@@ -1100,6 +1382,13 @@ function getSelectedRows() {
   return rows;
 }
 
+function findAiColumnIndex(sheet, targetConfig) {
+  for (const [rawCol, config] of Object.entries(normalizeAiColumns(sheet))) {
+    if (config === targetConfig) return Number(rawCol);
+  }
+  return -1;
+}
+
 async function executeAiColumnRow(sheet, row, col, config) {
   const providerState = state.providers[config.provider];
   const apiKey = providerState.apiKey.trim();
@@ -1135,8 +1424,27 @@ async function executeAiColumnRow(sheet, row, col, config) {
     text: rowPayload
   });
 
-  setRawCell(sheet, row, col, data.result || "");
-  return { status: "completed", message: `Completed row ${row + 1} for "${config.name}".` };
+  const rawResult = data.result ?? "";
+  const parsedResult = tryParseJson(rawResult);
+  const displayValue = parsedResult ? summarizeJson(parsedResult) : String(rawResult);
+
+  setRawCell(sheet, row, col, displayValue);
+  setAiCellRecord(sheet, row, col, {
+    raw: String(rawResult),
+    parsed: parsedResult,
+    displayValue
+  });
+
+  if (parsedResult) {
+    writeJsonOutputsToSheet(sheet, row, col, config, parsedResult);
+  }
+
+  return {
+    status: "completed",
+    message: parsedResult
+      ? `Completed row ${row + 1} for "${config.name}" and expanded JSON fields.`
+      : `Completed row ${row + 1} for "${config.name}".`
+  };
 }
 
 async function runAiColumnCell(row, col) {
@@ -1183,7 +1491,7 @@ async function runAiColumnsForRows(rows, columns) {
   for (const row of rows) {
     for (const col of columns) {
       const config = normalizeAiColumns(sheet)[col];
-      if (config) jobs.push({ row, col, config });
+      if (config) jobs.push({ row, config });
     }
   }
 
@@ -1199,17 +1507,23 @@ async function runAiColumnsForRows(rows, columns) {
 
   for (let index = 0; index < jobs.length; index++) {
     const job = jobs[index];
+    const liveCol = findAiColumnIndex(sheet, job.config);
+    if (liveCol < 0) {
+      skipped += 1;
+      continue;
+    }
+
     setStatus(`Running ${index + 1}/${jobs.length}: row ${job.row + 1} for "${job.config.name}"...`);
     renderSheet();
 
     try {
-      const result = await executeAiColumnRow(sheet, job.row, job.col, job.config);
+      const result = await executeAiColumnRow(sheet, job.row, liveCol, job.config);
       if (result.status === "skipped") skipped += 1;
       if (result.status === "completed") completed += 1;
       setStatus(result.message);
     } catch (error) {
       failed += 1;
-      setRawCell(sheet, job.row, job.col, error.message || "Request failed");
+      setRawCell(sheet, job.row, liveCol, error.message || "Request failed");
       setStatus(`Failed row ${job.row + 1} for "${job.config.name}".`);
     }
 
@@ -1236,6 +1550,9 @@ function bindTableEvents() {
 
     const runButton = event.target.closest("[data-run-ai-row]");
     if (runButton) return;
+
+    const viewButton = event.target.closest("[data-view-json-row]");
+    if (viewButton) return;
 
     const cell = event.target.closest("[data-cell]");
     const rowHeader = event.target.closest("[data-row-header]");
@@ -1299,6 +1616,21 @@ function bindTableEvents() {
       return;
     }
 
+    const viewButton = event.target.closest("[data-view-json-row]");
+    if (viewButton) {
+      event.preventDefault();
+      const row = Number(viewButton.dataset.viewJsonRow);
+      const col = Number(viewButton.dataset.viewJsonCol);
+      const sheet = getActiveSheet();
+      const record = getAiCellRecord(sheet, row, col);
+      openJsonViewer({
+        title: `${getActiveSheet().name} • ${columnLabel(col)}${row + 1}`,
+        raw: record?.raw || getRawCell(sheet, row, col),
+        parsed: record?.parsed || tryParseJson(getRawCell(sheet, row, col))
+      });
+      return;
+    }
+
     const runButton = event.target.closest("[data-run-ai-row]");
     if (!runButton) return;
     event.preventDefault();
@@ -1342,10 +1674,25 @@ function bindUi() {
   els.closeAiModalBtn.addEventListener("click", closeAiColumnModal);
   els.cancelAiModalBtn.addEventListener("click", closeAiColumnModal);
   els.saveAiColumnBtn.addEventListener("click", saveAiColumn);
+  els.closeJsonViewerBtn.addEventListener("click", closeJsonViewer);
+  els.copyJsonBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(state.jsonViewer.raw || els.jsonViewerBody.textContent || "");
+      setStatus("Copied JSON to clipboard.");
+    } catch {
+      setStatus("Could not copy JSON in this browser.");
+    }
+  });
 
   els.aiColumnModal.addEventListener("mousedown", (event) => {
     if (event.target === els.aiColumnModal) {
       closeAiColumnModal();
+    }
+  });
+
+  els.jsonViewerModal.addEventListener("mousedown", (event) => {
+    if (event.target === els.jsonViewerModal) {
+      closeJsonViewer();
     }
   });
 
@@ -1413,6 +1760,11 @@ function bindUi() {
   });
 
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.jsonViewer.open) {
+      closeJsonViewer();
+      return;
+    }
+
     if (event.key === "Escape" && state.aiModal.open) {
       closeAiColumnModal();
     }
