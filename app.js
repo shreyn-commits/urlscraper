@@ -1,11 +1,18 @@
-﻿const INITIAL_ROWS = 30;
+const INITIAL_ROWS = 30;
 const INITIAL_COLS = 12;
-
 const state = {
   sheets: [createSheet("Sheet 1", INITIAL_ROWS, INITIAL_COLS)],
   activeSheetId: "sheet-1",
   selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
-  status: "Ready."
+  status: "Ready.",
+  modelOptions: [],
+  selectedModel: "",
+  modelHelp: "Enter an API key to load models.",
+  modelsLoading: false,
+  slashMenus: {
+    prompt: createSlashMenuState(),
+    conditionPrompt: createSlashMenuState()
+  }
 };
 
 const els = {
@@ -23,14 +30,29 @@ const els = {
   activeCellName: document.getElementById("activeCellName"),
   formulaInput: document.getElementById("formulaInput"),
   provider: document.getElementById("provider"),
-  model: document.getElementById("model"),
+  modelSelect: document.getElementById("modelSelect"),
+  refreshModelsBtn: document.getElementById("refreshModelsBtn"),
+  modelHelp: document.getElementById("modelHelp"),
   apiKey: document.getElementById("apiKey"),
   aiScope: document.getElementById("aiScope"),
   prompt: document.getElementById("prompt"),
+  conditionPrompt: document.getElementById("conditionPrompt"),
+  promptSlashMenu: document.getElementById("promptSlashMenu"),
+  conditionSlashMenu: document.getElementById("conditionSlashMenu"),
   runAiBtn: document.getElementById("runAiBtn"),
   status: document.getElementById("status"),
   sheetMeta: document.getElementById("sheetMeta")
 };
+
+function createSlashMenuState() {
+  return {
+    visible: false,
+    items: [],
+    selectedIndex: 0,
+    triggerStart: 0,
+    cursorEnd: 0
+  };
+}
 
 function createSheet(name, rows, cols) {
   return {
@@ -222,6 +244,60 @@ function formatSelectionSummary() {
   return `${start}:${end} selected`;
 }
 
+function renderModelSelect() {
+  if (state.modelsLoading) {
+    els.modelSelect.innerHTML = '<option value="">Loading models...</option>';
+    els.modelSelect.value = "";
+    els.modelHelp.textContent = state.modelHelp;
+    return;
+  }
+
+  if (!state.modelOptions.length) {
+    els.modelSelect.innerHTML = '<option value="">Enter an API key to load models</option>';
+    els.modelSelect.value = "";
+    els.modelHelp.textContent = state.modelHelp;
+    return;
+  }
+
+  els.modelSelect.innerHTML = state.modelOptions
+    .map((option) => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+
+  const selected =
+    state.modelOptions.find((option) => option.id === state.selectedModel)?.id || state.modelOptions[0].id;
+  state.selectedModel = selected;
+  els.modelSelect.value = selected;
+  els.modelHelp.textContent = state.modelHelp;
+}
+
+function renderSlashMenu(targetId) {
+  const menuState = state.slashMenus[targetId];
+  const menuEl = targetId === "prompt" ? els.promptSlashMenu : els.conditionSlashMenu;
+
+  if (!menuState.visible || !menuState.items.length) {
+    menuEl.classList.add("hidden");
+    menuEl.innerHTML = "";
+    return;
+  }
+
+  menuEl.classList.remove("hidden");
+  menuEl.innerHTML = menuState.items
+    .map((item, index) => {
+      const active = index === menuState.selectedIndex ? " active" : "";
+      return `
+        <button
+          type="button"
+          class="slash-item${active}"
+          data-slash-target="${targetId}"
+          data-slash-index="${index}"
+        >
+          <span class="slash-title">${escapeHtml(item.label)}</span>
+          <span class="slash-subtitle">${escapeHtml(item.subtitle)}</span>
+        </button>`;
+    })
+    .join("");
+}
+
 function renderTabs() {
   const activeSheet = getActiveSheet();
   els.sheetTabs.innerHTML = state.sheets
@@ -285,6 +361,9 @@ function renderSheet() {
 
 function render() {
   renderSheet();
+  renderModelSelect();
+  renderSlashMenu("prompt");
+  renderSlashMenu("conditionPrompt");
 }
 
 function focusSelectedInput() {
@@ -472,36 +551,275 @@ function getRowPayload(sheet, row, startCol, endCol) {
   return JSON.stringify(payload, null, 2);
 }
 
-async function runAi() {
-  const prompt = els.prompt.value.trim();
-  if (!prompt) {
-    setStatus("Add a prompt first.");
-    render();
+function getRowDataMap(sheet, row) {
+  const used = getUsedRange(sheet);
+  const totalCols = Math.max(used.cols, state.selection.endCol + 1, INITIAL_COLS);
+  const cache = new Map();
+  const rowData = {};
+
+  for (let col = 0; col < totalCols; col++) {
+    rowData[columnLabel(col)] = getDisplayCell(sheet, row, col, cache);
+  }
+
+  return rowData;
+}
+
+function buildPromptContext(sheet, row, col, currentValue) {
+  const rowData = getRowDataMap(sheet, row);
+  return {
+    rowNumber: row + 1,
+    currentColumn: columnLabel(col),
+    currentValue,
+    cellRef: `${columnLabel(col)}${row + 1}`,
+    sheetName: sheet.name,
+    rowJson: JSON.stringify(rowData, null, 2),
+    columns: rowData
+  };
+}
+
+function resolvePromptTemplate(template, context) {
+  return template.replace(/{{\s*([^}]+)\s*}}/g, (_, rawKey) => {
+    const key = String(rawKey).trim();
+    const normalized = key.toLowerCase();
+
+    if (normalized === "row_number") return String(context.rowNumber);
+    if (normalized === "current_value") return String(context.currentValue ?? "");
+    if (normalized === "current_column") return context.currentColumn;
+    if (normalized === "cell_ref") return context.cellRef;
+    if (normalized === "sheet_name") return context.sheetName;
+    if (normalized === "row_json") return context.rowJson;
+
+    const columnMatch = /^column:(.+)$/i.exec(key);
+    if (columnMatch) {
+      const column = columnMatch[1].trim().toUpperCase();
+      return String(context.columns[column] ?? "");
+    }
+
+    return "";
+  });
+}
+
+function getSlashItems() {
+  const sheet = getActiveSheet();
+  const used = getUsedRange(sheet);
+  const totalCols = Math.max(used.cols, state.selection.endCol + 1, INITIAL_COLS);
+  const helpers = [
+    { label: "/current_value", subtitle: "Insert the current cell or row payload", token: "{{current_value}}", search: "current_value value cell" },
+    { label: "/row_number", subtitle: "Insert the current row number", token: "{{row_number}}", search: "row_number row number" },
+    { label: "/current_column", subtitle: "Insert the active column letter", token: "{{current_column}}", search: "current_column column letter" },
+    { label: "/cell_ref", subtitle: "Insert the active cell reference like B7", token: "{{cell_ref}}", search: "cell_ref cell reference" },
+    { label: "/row_json", subtitle: "Insert the full current row as JSON", token: "{{row_json}}", search: "row_json row json" },
+    { label: "/sheet_name", subtitle: "Insert the current sheet name", token: "{{sheet_name}}", search: "sheet_name sheet" }
+  ];
+
+  const columns = Array.from({ length: totalCols }, (_, col) => {
+    const letter = columnLabel(col);
+    return {
+      label: `/${letter}`,
+      subtitle: `Insert column ${letter} from the current row`,
+      token: `{{column:${letter}}}`,
+      search: `${letter.toLowerCase()} column ${letter.toLowerCase()}`
+    };
+  });
+
+  return [...helpers, ...columns];
+}
+
+function hideSlashMenu(targetId) {
+  state.slashMenus[targetId] = createSlashMenuState();
+  renderSlashMenu(targetId);
+}
+
+function updateSlashMenu(textarea) {
+  const targetId = textarea.id;
+  const beforeCursor = textarea.value.slice(0, textarea.selectionStart);
+  const match = /(?:^|\s)\/([a-zA-Z0-9_]*)$/.exec(beforeCursor);
+
+  if (!match) {
+    hideSlashMenu(targetId);
     return;
   }
 
-  const sheet = getActiveSheet();
-  const scope = els.aiScope.value;
+  const query = match[1].toLowerCase();
+  const items = getSlashItems().filter((item) => item.search.includes(query));
+  state.slashMenus[targetId] = {
+    visible: items.length > 0,
+    items,
+    selectedIndex: 0,
+    triggerStart: textarea.selectionStart - query.length - 1,
+    cursorEnd: textarea.selectionStart
+  };
+
+  const otherTarget = targetId === "prompt" ? "conditionPrompt" : "prompt";
+  hideSlashMenu(otherTarget);
+  renderSlashMenu(targetId);
+}
+
+function insertSlashToken(targetId, index) {
+  const textarea = targetId === "prompt" ? els.prompt : els.conditionPrompt;
+  const menuState = state.slashMenus[targetId];
+  const item = menuState.items[index];
+  if (!item) return;
+
+  const before = textarea.value.slice(0, menuState.triggerStart);
+  const after = textarea.value.slice(menuState.cursorEnd);
+  const nextValue = `${before}${item.token} ${after}`;
+  const nextCursor = `${before}${item.token} `.length;
+
+  textarea.value = nextValue;
+  textarea.focus();
+  textarea.setSelectionRange(nextCursor, nextCursor);
+  hideSlashMenu(targetId);
+}
+
+function handleSlashKeydown(event) {
+  const targetId = event.target.id;
+  const menuState = state.slashMenus[targetId];
+  if (!menuState.visible || !menuState.items.length) return;
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    menuState.selectedIndex = (menuState.selectedIndex + 1) % menuState.items.length;
+    renderSlashMenu(targetId);
+  }
+
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    menuState.selectedIndex = (menuState.selectedIndex - 1 + menuState.items.length) % menuState.items.length;
+    renderSlashMenu(targetId);
+  }
+
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    insertSlashToken(targetId, menuState.selectedIndex);
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    hideSlashMenu(targetId);
+  }
+}
+
+function detectProviderFromKey(apiKey) {
+  if (!apiKey) return null;
+  if (apiKey.startsWith("sk-ant")) return "claude";
+  if (apiKey.startsWith("sk-")) return "openai";
+  return null;
+}
+
+async function callAiEndpoint(payload) {
+  const response = await fetch("/api/run-ai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed");
+  }
+  return data;
+}
+
+async function shouldRunJob({ provider, apiKey, model, conditionPrompt, job }) {
+  if (!conditionPrompt) return true;
+
+  const gatePrompt = [
+    "You are deciding whether a spreadsheet automation should run.",
+    "Return exactly one word: RUN or SKIP.",
+    "Run the job only if the condition below is satisfied.",
+    conditionPrompt
+  ].join("\n\n");
+
+  const gateText = [
+    `Cell reference: ${job.context.cellRef}`,
+    `Current value:\n${job.context.currentValue}`,
+    `Row JSON:\n${job.context.rowJson}`,
+    `Primary payload:\n${job.input}`
+  ].join("\n\n");
+
+  const data = await callAiEndpoint({
+    provider,
+    apiKey,
+    model,
+    prompt: gatePrompt,
+    text: gateText
+  });
+
+  const answer = String(data.result || "").trim().toUpperCase();
+  return answer.startsWith("RUN");
+}
+
+async function loadModels() {
   const provider = els.provider.value;
   const apiKey = els.apiKey.value.trim();
-  const model = els.model.value.trim();
+
+  if (!apiKey) {
+    state.modelOptions = [];
+    state.selectedModel = "";
+    state.modelHelp = "Enter an API key to load models.";
+    renderModelSelect();
+    return;
+  }
+
+  state.modelsLoading = true;
+  state.modelHelp = `Loading supported ${provider} models...`;
+  renderModelSelect();
+
+  try {
+    const response = await fetch("/api/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, apiKey })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Unable to load models");
+    }
+
+    state.modelOptions = data.models || [];
+    state.selectedModel =
+      state.modelOptions.find((option) => option.id === state.selectedModel)?.id || state.modelOptions[0]?.id || "";
+    state.modelHelp =
+      data.message ||
+      (state.modelOptions.length
+        ? `Loaded ${state.modelOptions.length} supported ${provider} model${state.modelOptions.length === 1 ? "" : "s"}.`
+        : "No supported models were returned for this key.");
+  } catch (error) {
+    state.modelOptions = [];
+    state.selectedModel = "";
+    state.modelHelp = error.message || "Unable to load models.";
+  } finally {
+    state.modelsLoading = false;
+    renderModelSelect();
+  }
+}
+
+function buildJobs(scope) {
+  const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
   const used = getUsedRange(sheet);
   const jobs = [];
 
   if (scope === "cell") {
+    const value = getDisplayCell(sheet, bounds.endRow, bounds.endCol);
     jobs.push({
-      input: getDisplayCell(sheet, bounds.endRow, bounds.endCol),
-      target: { row: bounds.endRow, col: bounds.endCol + 1 }
+      input: value,
+      target: { row: bounds.endRow, col: bounds.endCol + 1 },
+      context: buildPromptContext(sheet, bounds.endRow, bounds.endCol, value)
     });
   }
 
   if (scope === "selection") {
+    const width = bounds.endCol - bounds.startCol + 1;
     for (let row = bounds.startRow; row <= bounds.endRow; row++) {
       for (let col = bounds.startCol; col <= bounds.endCol; col++) {
+        const value = getDisplayCell(sheet, row, col);
         jobs.push({
-          input: getDisplayCell(sheet, row, col),
-          target: { row, col: col + (bounds.endCol - bounds.startCol + 1) }
+          input: value,
+          target: { row, col: col + width },
+          context: buildPromptContext(sheet, row, col, value)
         });
       }
     }
@@ -515,9 +833,11 @@ async function runAi() {
     const width = columnBounds.endCol - columnBounds.startCol + 1;
     for (let row = columnBounds.startRow; row <= columnBounds.endRow; row++) {
       for (let col = columnBounds.startCol; col <= columnBounds.endCol; col++) {
+        const value = getDisplayCell(sheet, row, col);
         jobs.push({
-          input: getDisplayCell(sheet, row, col),
-          target: { row, col: col + width }
+          input: value,
+          target: { row, col: col + width },
+          context: buildPromptContext(sheet, row, col, value)
         });
       }
     }
@@ -530,49 +850,95 @@ async function runAi() {
         : bounds;
     const outputCol = rowBounds.endCol + 1;
     for (let row = rowBounds.startRow; row <= rowBounds.endRow; row++) {
+      const rowPayload = getRowPayload(sheet, row, rowBounds.startCol, rowBounds.endCol);
       jobs.push({
-        input: getRowPayload(sheet, row, rowBounds.startCol, rowBounds.endCol),
-        target: { row, col: outputCol }
+        input: rowPayload,
+        target: { row, col: outputCol },
+        context: buildPromptContext(sheet, row, rowBounds.startCol, rowPayload)
       });
     }
   }
 
-  if (!jobs.length) {
-    setStatus("Nothing selected for AI processing.");
-    render();
+  return jobs;
+}
+
+async function runAi() {
+  const promptTemplate = els.prompt.value.trim();
+  const conditionTemplate = els.conditionPrompt.value.trim();
+  const provider = els.provider.value;
+  const apiKey = els.apiKey.value.trim();
+  const model = els.modelSelect.value || state.selectedModel;
+
+  if (!promptTemplate) {
+    setStatus("Add a prompt first.");
+    renderSheet();
     return;
   }
 
+  if (!model) {
+    setStatus("Load models for this key and choose one first.");
+    renderSheet();
+    return;
+  }
+
+  const jobs = buildJobs(els.aiScope.value);
+  if (!jobs.length) {
+    setStatus("Nothing selected for AI processing.");
+    renderSheet();
+    return;
+  }
+
+  const sheet = getActiveSheet();
+  let completed = 0;
+  let skipped = 0;
+
   setStatus(`Running ${provider} on ${jobs.length} item${jobs.length === 1 ? "" : "s"}...`);
-  render();
+  renderSheet();
 
   for (let index = 0; index < jobs.length; index++) {
     const job = jobs[index];
+
     try {
-      const response = await fetch("/api/run-ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          apiKey,
-          model,
-          prompt,
-          text: job.input
-        })
+      const resolvedCondition = conditionTemplate ? resolvePromptTemplate(conditionTemplate, job.context) : "";
+      const shouldRun = await shouldRunJob({
+        provider,
+        apiKey,
+        model,
+        conditionPrompt: resolvedCondition,
+        job
       });
 
-      const data = await response.json();
-      setRawCell(sheet, job.target.row, job.target.col, data.result || data.error || "");
-      setStatus(`Running ${provider} on ${index + 1}/${jobs.length} item${jobs.length === 1 ? "" : "s"}...`);
-      render();
+      if (!shouldRun) {
+        setRawCell(sheet, job.target.row, job.target.col, "");
+        skipped++;
+        setStatus(`Checked ${index + 1}/${jobs.length} items. ${skipped} skipped by condition.`);
+        renderSheet();
+        continue;
+      }
+
+      const resolvedPrompt = resolvePromptTemplate(promptTemplate, job.context);
+      const data = await callAiEndpoint({
+        provider,
+        apiKey,
+        model,
+        prompt: resolvedPrompt,
+        text: job.input
+      });
+
+      setRawCell(sheet, job.target.row, job.target.col, data.result || "");
+      completed++;
+      setStatus(`Processed ${index + 1}/${jobs.length} items. ${skipped} skipped.`);
+      renderSheet();
     } catch (error) {
       setRawCell(sheet, job.target.row, job.target.col, error.message || "Request failed");
-      render();
+      setStatus(`Stopped on item ${index + 1}: ${error.message || "Request failed"}`);
+      renderSheet();
+      return;
     }
   }
 
-  setStatus("AI run complete.");
-  render();
+  setStatus(`AI run complete. ${completed} completed, ${skipped} skipped.`);
+  renderSheet();
 }
 
 function bindTableEvents() {
@@ -631,6 +997,22 @@ function bindTableEvents() {
   });
 }
 
+function bindPromptTextarea(textarea) {
+  textarea.addEventListener("input", () => {
+    updateSlashMenu(textarea);
+  });
+
+  textarea.addEventListener("click", () => {
+    updateSlashMenu(textarea);
+  });
+
+  textarea.addEventListener("keydown", handleSlashKeydown);
+
+  textarea.addEventListener("blur", () => {
+    window.setTimeout(() => hideSlashMenu(textarea.id), 120);
+  });
+}
+
 function bindUi() {
   els.csvFile.addEventListener("change", async () => {
     const file = els.csvFile.files?.[0];
@@ -646,6 +1028,7 @@ function bindUi() {
   els.newSheetBtn.addEventListener("click", addSheet);
   els.renameSheetBtn.addEventListener("click", renameSheet);
   els.runAiBtn.addEventListener("click", runAi);
+  els.refreshModelsBtn.addEventListener("click", loadModels);
 
   els.formulaInput.addEventListener("input", () => {
     const sheet = getActiveSheet();
@@ -669,6 +1052,26 @@ function bindUi() {
     render();
   });
 
+  els.provider.addEventListener("change", () => {
+    state.modelOptions = [];
+    state.selectedModel = "";
+    state.modelHelp = "Load models for the selected provider.";
+    renderModelSelect();
+    if (els.apiKey.value.trim()) loadModels();
+  });
+
+  els.modelSelect.addEventListener("change", () => {
+    state.selectedModel = els.modelSelect.value;
+  });
+
+  els.apiKey.addEventListener("blur", () => {
+    const detectedProvider = detectProviderFromKey(els.apiKey.value.trim());
+    if (detectedProvider && detectedProvider !== els.provider.value) {
+      els.provider.value = detectedProvider;
+    }
+    if (els.apiKey.value.trim()) loadModels();
+  });
+
   els.sheetTabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-sheet-id]");
     if (!button) return;
@@ -676,6 +1079,18 @@ function bindUi() {
     state.selection = { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
     setStatus(`Switched to ${getActiveSheet().name}.`);
     render();
+  });
+
+  bindPromptTextarea(els.prompt);
+  bindPromptTextarea(els.conditionPrompt);
+
+  [els.promptSlashMenu, els.conditionSlashMenu].forEach((menuEl) => {
+    menuEl.addEventListener("mousedown", (event) => {
+      const button = event.target.closest("[data-slash-index]");
+      if (!button) return;
+      event.preventDefault();
+      insertSlashToken(button.dataset.slashTarget, Number(button.dataset.slashIndex));
+    });
   });
 }
 

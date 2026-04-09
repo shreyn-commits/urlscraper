@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runAiRequest } from "./lib/ai.js";
+import { listSupportedModels, runAiRequest } from "./lib/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +61,22 @@ const server = http.createServer(async (req, res) => {
       "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
     });
     res.end();
+    return;
+  }
+
+  if (req.url === "/api/models" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      const models = await listSupportedModels(body);
+      send(res, 200, {
+        models,
+        message: models.length
+          ? "Loaded supported models for this API key."
+          : "No supported models from the curated list were available for this key."
+      });
+    } catch (error) {
+      send(res, 500, { error: error.message || "Unknown error" });
+    }
     return;
   }
 

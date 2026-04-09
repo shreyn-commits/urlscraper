@@ -78,7 +78,16 @@
 
             <label class="field">
               <span>Model</span>
-              <input id="model" placeholder="gpt-4.1-mini or claude-3-5-sonnet-20241022" />
+              <div class="inline-field">
+                <select id="modelSelect">
+                  <option value="">Enter an API key to load models</option>
+                </select>
+                <button id="refreshModelsBtn" type="button">Load Models</button>
+              </div>
+              <p class="field-help" id="modelHelp">
+                The model list is filtered to a curated set of supported models that
+                your key can access.
+              </p>
             </label>
 
             <label class="field">
@@ -98,17 +107,38 @@
 
             <label class="field grow">
               <span>Prompt</span>
-              <textarea
-                id="prompt"
-                rows="7"
-                placeholder="Examples: classify sentiment, extract entities, summarize the row, normalize the value, or transform text into JSON."
-              ></textarea>
+              <div class="textarea-shell">
+                <textarea
+                  id="prompt"
+                  rows="7"
+                  placeholder="Examples: classify sentiment, extract entities, summarize the row, normalize the value, or transform text into JSON."
+                ></textarea>
+                <div id="promptSlashMenu" class="slash-menu hidden"></div>
+              </div>
+            </label>
+
+            <label class="field grow">
+              <span>AI condition</span>
+              <div class="textarea-shell">
+                <textarea
+                  id="conditionPrompt"
+                  rows="4"
+                  placeholder="Optional. Example: only run if {{column:A}} contains an invoice request and {{column:C}} is not empty."
+                ></textarea>
+                <div id="conditionSlashMenu" class="slash-menu hidden"></div>
+              </div>
+              <p class="field-help">
+                If you add a condition, AI will decide whether to RUN or SKIP each
+                row or cell before the main prompt runs.
+              </p>
             </label>
 
             <button id="runAiBtn" class="primary" type="button">Run AI</button>
             <p class="ai-note">
               Row runs write one result column to the right. Cell and range runs
               write results to the right of the selected area so your source data stays intact.
+              Type <code>/</code> in either prompt box to insert row-aware column references
+              like <code>{{column:A}}</code>, plus helpers like row number and current value.
             </p>
           </aside>
         </div>
