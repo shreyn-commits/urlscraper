@@ -80,6 +80,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === "/api/config" && req.method === "GET") {
+    send(res, 200, {
+      googleClientId: process.env.GOOGLE_CLIENT_ID || ""
+    });
+    return;
+  }
+
   if ((req.url === "/api/run-column" || req.url === "/api/run-ai") && req.method === "POST") {
     try {
       const body = await readBody(req);

@@ -7,12 +7,28 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <div class="auth-overlay hidden" id="authOverlay">
+      <div class="auth-card">
+        <img class="auth-logo" src="/assets/dfm-logo.png" alt="DFM logo" />
+        <p class="auth-eyebrow">Google Login</p>
+        <h1>Sign in to use your workspace</h1>
+        <p class="auth-copy">
+          Sign in with Google to open your workspace. Your saved AI keys and sheet settings stay tied to your account.
+        </p>
+        <div id="googleSignInBtn" class="google-signin-slot"></div>
+        <p class="auth-note" id="authNote">Loading sign-in.</p>
+      </div>
+    </div>
+
     <main class="app-shell">
       <section class="table-shell">
         <div class="table-topbar">
           <div class="status-cluster">
             <img class="brand-mark" src="/assets/dfm-logo.png" alt="DFM logo" />
-            <span id="status">Ready.</span>
+            <div class="status-lines">
+              <span id="status">Ready.</span>
+              <span class="user-chip hidden" id="userChip"></span>
+            </div>
           </div>
           <span id="sheetMeta"></span>
         </div>
@@ -35,6 +51,7 @@
             <button id="deleteColBtn" type="button">Delete Column</button>
             <button id="newSheetBtn" type="button">New Sheet</button>
             <button id="renameSheetBtn" type="button">Rename Sheet</button>
+            <button id="signOutBtn" type="button" class="ghost-btn">Sign Out</button>
             <span class="selection-summary" id="selectionSummary">A1 selected</span>
           </div>
         </div>
@@ -105,12 +122,23 @@
               <textarea
                 id="prompt"
                 rows="7"
-                placeholder="Write the enrichment prompt for this column. Type / to pull in values from the current row."
+                placeholder='Write the enrichment prompt for this column. Ask for strict JSON, for example: {"decision":"yes","confidence":0.92}.'
               ></textarea>
               <div id="promptSlashMenu" class="slash-menu hidden"></div>
             </div>
             <p class="field-help">
-              Use `/` to insert row-aware references like firstName, companyName, or any other available column.
+              Use `/` to insert row-aware references like firstName, companyName, or any other available column. Ask for JSON keys like `decision`, `confidence`, and `reason`.
+            </p>
+          </label>
+
+          <label class="field grow">
+            <span>Output Fields</span>
+            <input
+              id="outputFields"
+              placeholder="decision, confidence, reason"
+            />
+            <p class="field-help">
+              List the JSON fields you want turned into columns before the first run. Separate names with commas. Nested paths like `company.domain` also work.
             </p>
           </label>
 
@@ -144,7 +172,7 @@
             <p class="modal-eyebrow">AI Result</p>
             <h2 id="jsonViewerTitle">JSON Output</h2>
             <p class="modal-copy">
-              This is the raw model response. Fields from this object are split into separate columns automatically.
+              This is the raw model response. You can inspect the JSON and create columns from its fields when needed.
             </p>
           </div>
           <button id="closeJsonViewerBtn" type="button" class="ghost-btn">Close</button>
@@ -153,11 +181,13 @@
         <pre id="jsonViewerBody" class="json-viewer-body"></pre>
 
         <div class="modal-actions">
+          <button id="createColumnsFromJsonBtn" type="button" class="primary-btn">Add Fields As Columns</button>
           <button id="copyJsonBtn" type="button" class="ghost-btn">Copy JSON</button>
         </div>
       </div>
     </div>
 
     <script type="module" src="/main.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </body>
 </html>

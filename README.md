@@ -1,6 +1,6 @@
 # CSV AI Spreadsheet
 
-A tiny browser-based spreadsheet for working with CSV files and running a prompt across a chosen column using either OpenAI or Claude.
+A tiny browser-based spreadsheet for working with CSV files and running prompts across rows and columns using either OpenAI or Claude.
 
 ## What it does
 
@@ -8,7 +8,21 @@ A tiny browser-based spreadsheet for working with CSV files and running a prompt
 - Edit cells directly in the browser
 - Rename headers
 - Export the updated sheet back to CSV
-- Run a prompt over each cell in a selected column and write the result into a new AI output column
+- Run prompts over selected rows or columns
+- Inspect structured JSON responses
+- Create separate columns from JSON fields such as `confidence`
+
+## Google Login
+
+This version supports Google sign-in.
+
+Set this Vercel environment variable:
+
+`GOOGLE_CLIENT_ID`
+
+Per-user API keys are stored in that signed-in user's browser settings, keyed by their Google account email. That keeps one user's keys separate from another user's keys. If you want true server-side storage across devices, we should add a database next.
+
+The app treats those saved keys like a private workspace secret store for that signed-in account. It is not a literal deployment environment variable per user, but it behaves that way inside the app.
 
 ## Run it
 
@@ -26,5 +40,6 @@ The app uses a local proxy server so API keys stay off the page.
 
 ## Notes
 
-- The current UI runs the prompt row-by-row for the selected column and writes the responses into a new column.
-- If you want batch processing, row-level controls, file persistence, or formula support, this can be extended next.
+- The UI is being tightened toward a Clay-style workflow.
+- AI columns now support predefining output fields like `decision`, `confidence`, and `reason`, then filling them from JSON results.
+- If you want true server-side per-user secret storage, we should add a database or secret store next.

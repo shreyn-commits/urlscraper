@@ -24,7 +24,15 @@ const state = {
     open: false,
     title: "",
     raw: "",
-    parsed: null
+    parsed: null,
+    row: null,
+    col: null
+  },
+  auth: {
+    loading: true,
+    clientId: "",
+    user: null,
+    settings: null
   }
 };
 
@@ -52,6 +60,7 @@ const els = {
   apiKey: document.getElementById("apiKey"),
   aiColumnName: document.getElementById("aiColumnName"),
   prompt: document.getElementById("prompt"),
+  outputFields: document.getElementById("outputFields"),
   conditionPrompt: document.getElementById("conditionPrompt"),
   promptSlashMenu: document.getElementById("promptSlashMenu"),
   conditionSlashMenu: document.getElementById("conditionSlashMenu"),
@@ -68,7 +77,13 @@ const els = {
   jsonViewerTitle: document.getElementById("jsonViewerTitle"),
   jsonViewerBody: document.getElementById("jsonViewerBody"),
   closeJsonViewerBtn: document.getElementById("closeJsonViewerBtn"),
-  copyJsonBtn: document.getElementById("copyJsonBtn")
+  copyJsonBtn: document.getElementById("copyJsonBtn"),
+  createColumnsFromJsonBtn: document.getElementById("createColumnsFromJsonBtn"),
+  authOverlay: document.getElementById("authOverlay"),
+  googleSignInBtn: document.getElementById("googleSignInBtn"),
+  authNote: document.getElementById("authNote"),
+  signOutBtn: document.getElementById("signOutBtn"),
+  userChip: document.getElementById("userChip")
 };
 
 function createProviderState() {
@@ -79,6 +94,75 @@ function createProviderState() {
     modelHelp: "Enter an API key to load models.",
     loading: false
   };
+}
+
+function createDefaultUserSettings(email = "") {
+  return {
+    email,
+    displayName: "",
+    picture: "",
+    env: {
+      OPENAI_API_KEY: "",
+      ANTHROPIC_API_KEY: ""
+    },
+    providerApiKeys: {
+      openai: "",
+      claude: ""
+    },
+    providerModels: {
+      openai: "",
+      claude: ""
+    }
+  };
+}
+
+function getUserSettingsStorageKey(email) {
+  return `dfm-user-settings:${String(email || "").toLowerCase()}`;
+}
+
+function loadUserSettings(email) {
+  if (!email) return createDefaultUserSettings();
+  try {
+    const raw = localStorage.getItem(getUserSettingsStorageKey(email));
+    if (!raw) return createDefaultUserSettings(email);
+    const parsed = JSON.parse(raw);
+    return {
+      ...createDefaultUserSettings(email),
+      ...parsed,
+      env: {
+        ...createDefaultUserSettings(email).env,
+        ...(parsed.env || {})
+      },
+      providerApiKeys: {
+        ...createDefaultUserSettings(email).providerApiKeys,
+        ...(parsed.providerApiKeys || {})
+      },
+      providerModels: {
+        ...createDefaultUserSettings(email).providerModels,
+        ...(parsed.providerModels || {})
+      }
+    };
+  } catch {
+    return createDefaultUserSettings(email);
+  }
+}
+
+function saveUserSettings() {
+  if (!state.auth.user?.email || !state.auth.settings) return;
+  localStorage.setItem(getUserSettingsStorageKey(state.auth.user.email), JSON.stringify(state.auth.settings));
+}
+
+function setCurrentUser(user) {
+  state.auth.user = user;
+  state.auth.settings = loadUserSettings(user?.email);
+  state.providers.openai.apiKey =
+    state.auth.settings.providerApiKeys.openai || state.auth.settings.env.OPENAI_API_KEY || "";
+  state.providers.claude.apiKey =
+    state.auth.settings.providerApiKeys.claude || state.auth.settings.env.ANTHROPIC_API_KEY || "";
+  state.providers.openai.selectedModel = state.auth.settings.providerModels.openai || "";
+  state.providers.claude.selectedModel = state.auth.settings.providerModels.claude || "";
+  els.userChip.textContent = user ? `${user.name || user.email}` : "";
+  els.userChip.classList.toggle("hidden", !user);
 }
 
 function createSlashMenuState() {
@@ -108,6 +192,37 @@ function getActiveSheet() {
 
 function getProviderState(provider = els.provider.value) {
   return state.providers[provider];
+}
+
+function setProviderApiKey(provider, apiKey) {
+  const providerState = getProviderState(provider);
+  providerState.apiKey = apiKey;
+  if (state.auth.settings) {
+    state.auth.settings.providerApiKeys[provider] = apiKey;
+    const envKey = getProviderEnvKey(provider);
+    if (envKey) state.auth.settings.env[envKey] = apiKey;
+    saveUserSettings();
+  }
+}
+
+function setProviderModel(provider, model) {
+  const providerState = getProviderState(provider);
+  providerState.selectedModel = model;
+  if (state.auth.settings) {
+    state.auth.settings.providerModels[provider] = model;
+    saveUserSettings();
+  }
+}
+
+function getProviderEnvKey(provider) {
+  return provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+}
+
+function parseOutputFieldNames(text) {
+  return String(text || "")
+    .split(",")
+    .map((field) => field.trim())
+    .filter(Boolean);
 }
 
 function normalizeAiColumns(sheet) {
@@ -776,8 +891,9 @@ function renderSheet() {
 
       const content = aiConfig
         ? `<div class="ai-cell-wrap">
-            ${inputMarkup}
-            <button class="cell-json-btn" data-view-json-row="${row}" data-view-json-col="${col}" type="button">JSON</button>
+            <button class="ai-result-btn" data-open-json-row="${row}" data-open-json-col="${col}" type="button">${escapeHtml(
+              value || "—"
+            )}</button>
             <button class="cell-run-btn" data-run-ai-row="${row}" data-run-ai-col="${col}" type="button">Run</button>
           </div>`
         : inputMarkup;
@@ -1191,6 +1307,10 @@ async function loadModels() {
       providerState.modelOptions.find((option) => option.id === providerState.selectedModel)?.id ||
       providerState.modelOptions[0]?.id ||
       providerState.selectedModel;
+    if (state.auth.settings) {
+      state.auth.settings.providerModels[provider] = providerState.selectedModel;
+      saveUserSettings();
+    }
     providerState.modelHelp =
       data.message ||
       (providerState.modelOptions.length
@@ -1212,14 +1332,14 @@ function syncApiKeyIntoState() {
   const detectedProvider = detectProviderFromKey(rawValue);
 
   if (detectedProvider && detectedProvider !== provider) {
-    state.providers[detectedProvider].apiKey = rawValue;
+    setProviderApiKey(detectedProvider, rawValue);
     els.provider.value = detectedProvider;
     els.apiKey.value = state.providers[detectedProvider].apiKey;
     renderModelSelect();
     return detectedProvider;
   }
 
-  state.providers[provider].apiKey = rawValue;
+  setProviderApiKey(provider, rawValue);
   return provider;
 }
 
@@ -1227,6 +1347,130 @@ function setProvider(provider) {
   els.provider.value = provider;
   els.apiKey.value = state.providers[provider].apiKey;
   renderModelSelect();
+}
+
+function decodeJwtPayload(token) {
+  const payload = token.split(".")[1];
+  if (!payload) return null;
+  const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+  const json = atob(base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "="));
+  return JSON.parse(json);
+}
+
+function persistAuthSession(user) {
+  if (user) {
+    localStorage.setItem("dfm-auth-session", JSON.stringify(user));
+  } else {
+    localStorage.removeItem("dfm-auth-session");
+  }
+}
+
+function loadAuthSession() {
+  try {
+    const raw = localStorage.getItem("dfm-auth-session");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchPublicConfig() {
+  try {
+    const response = await fetch("/api/config");
+    const data = await response.json();
+    state.auth.clientId = data.googleClientId || "";
+  } catch {
+    state.auth.clientId = "";
+  }
+}
+
+function renderAuthUi() {
+  const signedIn = Boolean(state.auth.user);
+  els.authOverlay.classList.toggle("hidden", signedIn);
+  els.signOutBtn.classList.toggle("hidden", !signedIn);
+  if (!signedIn) {
+    els.authNote.textContent = state.auth.clientId
+      ? "Loading Google sign-in..."
+      : "Set GOOGLE_CLIENT_ID in Vercel to enable Google sign-in.";
+    return;
+  }
+  const user = state.auth.user;
+  els.authNote.textContent = `Signed in as ${user.email}.`;
+  els.userChip.textContent = `${user.name || user.email}`;
+}
+
+function initializeGoogleSignIn() {
+  if (!state.auth.clientId || !window.google?.accounts?.id) {
+    renderAuthUi();
+    return;
+  }
+
+  google.accounts.id.initialize({
+    client_id: state.auth.clientId,
+    callback: (response) => {
+      try {
+        const payload = decodeJwtPayload(response.credential);
+        if (!payload?.email) throw new Error("Google sign-in failed.");
+        const user = {
+          id: payload.sub,
+          email: payload.email,
+          name: payload.name || payload.email,
+          picture: payload.picture || ""
+        };
+        persistAuthSession(user);
+        setCurrentUser(user);
+        state.auth.loading = false;
+        renderAuthUi();
+        syncApiKeyIntoState();
+        render();
+      } catch (error) {
+        setStatus(error.message || "Google sign-in failed.");
+      }
+    }
+  });
+
+  google.accounts.id.renderButton(els.googleSignInBtn, {
+    theme: "outline",
+    size: "large",
+    text: "continue_with",
+    shape: "pill",
+    width: 340
+  });
+
+  renderAuthUi();
+}
+
+function signOut() {
+  persistAuthSession(null);
+  state.auth.user = null;
+  state.auth.settings = null;
+  state.providers.openai = createProviderState();
+  state.providers.claude = createProviderState();
+  els.apiKey.value = "";
+  els.modelSelect.innerHTML = '<option value="">Enter an API key to load models</option>';
+  renderAuthUi();
+  render();
+}
+
+async function bootstrapApp() {
+  const session = loadAuthSession();
+  if (session?.email) {
+    setCurrentUser(session);
+  }
+
+  await fetchPublicConfig();
+  state.auth.loading = false;
+  renderAuthUi();
+
+  if (window.google?.accounts?.id) {
+    initializeGoogleSignIn();
+  } else {
+    window.setTimeout(initializeGoogleSignIn, 100);
+  }
+
+  if (state.auth.user) {
+    render();
+  }
 }
 
 function buildAiColumnConfig() {
@@ -1237,6 +1481,7 @@ function buildAiColumnConfig() {
     state.aiModal.mode === "edit" ? state.aiModal.columnIndex : state.aiModal.insertAt ?? getSelectionBounds().endCol + 1;
   const name = els.aiColumnName.value.trim() || `AI ${columnLabel(columnIndex)}`;
   const prompt = els.prompt.value.trim();
+  const outputFields = parseOutputFieldNames(els.outputFields.value);
   const existing = state.aiModal.mode === "edit" && columnIndex !== null ? getActiveSheet().aiColumns[columnIndex] : null;
 
   if (!prompt) {
@@ -1253,6 +1498,7 @@ function buildAiColumnConfig() {
     model,
     prompt,
     condition: els.conditionPrompt.value.trim(),
+    outputFields,
     outputColumns: existing?.outputColumns || {}
   };
 }
@@ -1268,13 +1514,16 @@ function closeAiColumnModal() {
   hideSlashMenu("conditionPrompt");
 }
 
-function openJsonViewer({ title, raw, parsed }) {
+function openJsonViewer({ title, raw, parsed, row, col }) {
   state.jsonViewer.open = true;
   state.jsonViewer.title = title;
   state.jsonViewer.raw = raw;
   state.jsonViewer.parsed = parsed;
+  state.jsonViewer.row = row;
+  state.jsonViewer.col = col;
   els.jsonViewerTitle.textContent = title;
   els.jsonViewerBody.textContent = formatJsonPretty(raw, parsed);
+  els.createColumnsFromJsonBtn.disabled = !parsed || typeof parsed !== "object";
   els.jsonViewerModal.classList.remove("hidden");
   document.body.classList.add("modal-open");
 }
@@ -1284,9 +1533,44 @@ function closeJsonViewer() {
   state.jsonViewer.title = "";
   state.jsonViewer.raw = "";
   state.jsonViewer.parsed = null;
+  state.jsonViewer.row = null;
+  state.jsonViewer.col = null;
   els.jsonViewerModal.classList.add("hidden");
+  els.createColumnsFromJsonBtn.disabled = true;
   if (!state.aiModal.open) {
     document.body.classList.remove("modal-open");
+  }
+}
+
+function createColumnsFromJson(parsed, sheet, row, aiCol, config) {
+  const flatEntries = flattenJson(parsed);
+  if (!flatEntries.length) return;
+
+  const created = [];
+  for (const entry of flatEntries) {
+    const path = entry.path || "value";
+    const displayLabel = path.replace(/\.+/g, " ").trim();
+    const outputCol = ensureOutputColumn(sheet, aiCol, path, displayLabel);
+    if (outputCol === null) continue;
+    setRawCell(sheet, row, outputCol, stringifyCellValue(entry.value));
+    created.push({ path, outputCol });
+  }
+
+  if (!config.outputColumns) config.outputColumns = {};
+  for (const item of created) {
+    config.outputColumns[item.path] = item.outputCol;
+  }
+  normalizeSheetMetadata(sheet);
+  render();
+}
+
+function configureOutputColumns(sheet, aiCol, config) {
+  const outputFields = Array.isArray(config.outputFields) ? config.outputFields : [];
+  if (!outputFields.length) return;
+
+  for (const path of outputFields) {
+    const displayLabel = path.replace(/\.+/g, " ").trim() || path;
+    ensureOutputColumn(sheet, aiCol, path, displayLabel);
   }
 }
 
@@ -1304,6 +1588,7 @@ async function openAiColumnModal(mode = "create", columnIndex = null) {
     els.aiColumnModalTitle.textContent = `Edit ${config.name}`;
     els.aiColumnName.value = config.name;
     els.prompt.value = config.prompt || "";
+    els.outputFields.value = (config.outputFields || []).join(", ");
     els.conditionPrompt.value = config.condition || "";
     setProvider(config.provider);
     state.providers[config.provider].selectedModel = config.model;
@@ -1311,6 +1596,7 @@ async function openAiColumnModal(mode = "create", columnIndex = null) {
     els.aiColumnModalTitle.textContent = "Create AI Column";
     els.aiColumnName.value = "";
     els.prompt.value = "";
+    els.outputFields.value = "";
     els.conditionPrompt.value = "";
     setProvider(els.provider.value);
   }
@@ -1337,6 +1623,7 @@ function saveAiColumn() {
 
     if (state.aiModal.mode === "edit" && state.aiModal.columnIndex !== null) {
       sheet.aiColumns[state.aiModal.columnIndex] = config;
+      configureOutputColumns(sheet, state.aiModal.columnIndex, config);
       selectCell(state.selection.endRow, state.aiModal.columnIndex, false, false);
       setStatus(`Updated AI column "${config.name}".`);
     } else {
@@ -1346,6 +1633,7 @@ function saveAiColumn() {
         row.splice(insertAt, 0, "");
       }
       sheet.aiColumns[insertAt] = config;
+      configureOutputColumns(sheet, insertAt, config);
       selectCell(state.selection.endRow, insertAt, false, false);
       setStatus(`Created AI column "${config.name}".`);
     }
@@ -1435,15 +1723,16 @@ async function executeAiColumnRow(sheet, row, col, config) {
     displayValue
   });
 
-  if (parsedResult) {
-    writeJsonOutputsToSheet(sheet, row, col, config, parsedResult);
+  if (parsedResult && config.outputColumns && Object.keys(config.outputColumns).length) {
+    const flatMap = new Map(flattenJson(parsedResult).map((item) => [item.path, item.value]));
+    for (const [path, outputCol] of Object.entries(config.outputColumns)) {
+      setRawCell(sheet, row, outputCol, stringifyCellValue(flatMap.get(path)));
+    }
   }
 
   return {
     status: "completed",
-    message: parsedResult
-      ? `Completed row ${row + 1} for "${config.name}" and expanded JSON fields.`
-      : `Completed row ${row + 1} for "${config.name}".`
+    message: `Completed row ${row + 1} for "${config.name}".`
   };
 }
 
@@ -1551,7 +1840,7 @@ function bindTableEvents() {
     const runButton = event.target.closest("[data-run-ai-row]");
     if (runButton) return;
 
-    const viewButton = event.target.closest("[data-view-json-row]");
+    const viewButton = event.target.closest("[data-open-json-row]");
     if (viewButton) return;
 
     const cell = event.target.closest("[data-cell]");
@@ -1616,17 +1905,19 @@ function bindTableEvents() {
       return;
     }
 
-    const viewButton = event.target.closest("[data-view-json-row]");
+    const viewButton = event.target.closest("[data-open-json-row]");
     if (viewButton) {
       event.preventDefault();
-      const row = Number(viewButton.dataset.viewJsonRow);
-      const col = Number(viewButton.dataset.viewJsonCol);
+      const row = Number(viewButton.dataset.openJsonRow);
+      const col = Number(viewButton.dataset.openJsonCol);
       const sheet = getActiveSheet();
       const record = getAiCellRecord(sheet, row, col);
       openJsonViewer({
-        title: `${getActiveSheet().name} • ${columnLabel(col)}${row + 1}`,
+        title: `${getActiveSheet().name} - ${columnLabel(col)}${row + 1}`,
         raw: record?.raw || getRawCell(sheet, row, col),
-        parsed: record?.parsed || tryParseJson(getRawCell(sheet, row, col))
+        parsed: record?.parsed || tryParseJson(getRawCell(sheet, row, col)),
+        row,
+        col
       });
       return;
     }
@@ -1683,6 +1974,18 @@ function bindUi() {
       setStatus("Could not copy JSON in this browser.");
     }
   });
+  els.createColumnsFromJsonBtn.addEventListener("click", () => {
+    if (!state.jsonViewer.parsed || typeof state.jsonViewer.parsed !== "object") return;
+    const sheet = getActiveSheet();
+    const row = state.jsonViewer.row ?? state.selection.endRow;
+    const col = state.jsonViewer.col ?? state.selection.endCol;
+    const config = normalizeAiColumns(sheet)[col];
+    if (!config) return;
+    createColumnsFromJson(state.jsonViewer.parsed, sheet, row, col, config);
+    closeJsonViewer();
+    setStatus(`Created columns from JSON for "${config.name}".`);
+  });
+  els.signOutBtn.addEventListener("click", signOut);
 
   els.aiColumnModal.addEventListener("mousedown", (event) => {
     if (event.target === els.aiColumnModal) {
@@ -1724,7 +2027,7 @@ function bindUi() {
   });
 
   els.modelSelect.addEventListener("change", () => {
-    getProviderState().selectedModel = els.modelSelect.value;
+    setProviderModel(els.provider.value, els.modelSelect.value);
   });
 
   els.apiKey.addEventListener("input", () => {
@@ -1773,4 +2076,4 @@ function bindUi() {
 
 bindTableEvents();
 bindUi();
-render();
+bootstrapApp();
