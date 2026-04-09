@@ -15,7 +15,9 @@
         <p class="auth-copy">
           Sign in with Google to open your workspace. Your saved AI keys and sheet settings stay tied to your account.
         </p>
-        <div id="googleSignInBtn" class="google-signin-slot"></div>
+        <button id="googleSignInBtn" class="google-signin-slot google-signin-btn" type="button">
+          Continue with Google
+        </button>
         <p class="auth-note" id="authNote">Loading sign-in.</p>
       </div>
     </div>
@@ -100,7 +102,7 @@
 
           <label class="field grow">
             <span>API Key</span>
-            <input id="apiKey" type="password" placeholder="Used only in this browser session unless you set server env vars" />
+            <input id="apiKey" type="password" placeholder="Saved to your Firebase user record" />
           </label>
 
           <label class="field grow">
@@ -188,6 +190,5 @@
     </div>
 
     <script type="module" src="/main.js"></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </body>
 </html>

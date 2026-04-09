@@ -14,15 +14,27 @@ A tiny browser-based spreadsheet for working with CSV files and running prompts 
 
 ## Google Login
 
-This version supports Google sign-in.
+This version supports Google sign-in through Firebase Auth.
 
-Set this Vercel environment variable:
+Set these Vercel environment variables:
 
-`GOOGLE_CLIENT_ID`
+`FIREBASE_API_KEY`
+`FIREBASE_AUTH_DOMAIN`
+`FIREBASE_PROJECT_ID`
+`FIREBASE_STORAGE_BUCKET`
+`FIREBASE_MESSAGING_SENDER_ID`
+`FIREBASE_APP_ID`
+`FIREBASE_MEASUREMENT_ID` optional
 
-Per-user API keys are stored in that signed-in user's browser settings, keyed by their Google account email. That keeps one user's keys separate from another user's keys. If you want true server-side storage across devices, we should add a database next.
+In Firebase, enable:
 
-The app treats those saved keys like a private workspace secret store for that signed-in account. It is not a literal deployment environment variable per user, but it behaves that way inside the app.
+- Google as an Auth provider
+- Firestore for the database
+- Your Vercel domain in Auth authorized domains
+
+Per-user API keys and settings are stored in Firestore under the signed-in user's Firebase Auth uid. That keeps one user's workspace separate from another user's workspace and syncs across devices.
+
+For Firestore security, use the included `firestore.rules` so each signed-in user can only read and write their own document.
 
 ## Run it
 
@@ -42,4 +54,4 @@ The app uses a local proxy server so API keys stay off the page.
 
 - The UI is being tightened toward a Clay-style workflow.
 - AI columns now support predefining output fields like `decision`, `confidence`, and `reason`, then filling them from JSON results.
-- If you want true server-side per-user secret storage, we should add a database or secret store next.
+- Firestore is now the per-user database layer for saved API keys, models, and sheet settings.

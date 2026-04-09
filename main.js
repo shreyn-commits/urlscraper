@@ -1,3 +1,19 @@
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import {
+  GoogleAuthProvider,
+  getAuth,
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut as firebaseSignOut
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import {
+  doc,
+  getDoc,
+  getFirestore,
+  serverTimestamp,
+  setDoc
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
 const INITIAL_ROWS = 30;
 const INITIAL_COLS = 12;
 
@@ -30,9 +46,16 @@ const state = {
   },
   auth: {
     loading: true,
-    clientId: "",
+    firebaseConfig: null,
+    ready: false,
     user: null,
     settings: null
+  },
+  firebase: {
+    app: null,
+    auth: null,
+    db: null,
+    provider: null
   }
 };
 
@@ -116,53 +139,83 @@ function createDefaultUserSettings(email = "") {
   };
 }
 
-function getUserSettingsStorageKey(email) {
-  return `dfm-user-settings:${String(email || "").toLowerCase()}`;
+function normalizeUserSettings(settings = {}, user = null) {
+  const defaults = createDefaultUserSettings(user?.email || settings.email || "");
+  return {
+    ...defaults,
+    ...settings,
+    env: {
+      ...defaults.env,
+      ...(settings.env || {})
+    },
+    providerApiKeys: {
+      ...defaults.providerApiKeys,
+      ...(settings.providerApiKeys || {})
+    },
+    providerModels: {
+      ...defaults.providerModels,
+      ...(settings.providerModels || {})
+    }
+  };
 }
 
-function loadUserSettings(email) {
-  if (!email) return createDefaultUserSettings();
-  try {
-    const raw = localStorage.getItem(getUserSettingsStorageKey(email));
-    if (!raw) return createDefaultUserSettings(email);
-    const parsed = JSON.parse(raw);
-    return {
-      ...createDefaultUserSettings(email),
-      ...parsed,
-      env: {
-        ...createDefaultUserSettings(email).env,
-        ...(parsed.env || {})
-      },
-      providerApiKeys: {
-        ...createDefaultUserSettings(email).providerApiKeys,
-        ...(parsed.providerApiKeys || {})
-      },
-      providerModels: {
-        ...createDefaultUserSettings(email).providerModels,
-        ...(parsed.providerModels || {})
-      }
-    };
-  } catch {
-    return createDefaultUserSettings(email);
+function applyUserSettings(user, settings) {
+  const normalized = normalizeUserSettings(settings, user);
+  state.auth.user = user;
+  state.auth.settings = normalized;
+  state.providers.openai.apiKey = normalized.providerApiKeys.openai || normalized.env.OPENAI_API_KEY || "";
+  state.providers.claude.apiKey = normalized.providerApiKeys.claude || normalized.env.ANTHROPIC_API_KEY || "";
+  state.providers.openai.selectedModel = normalized.providerModels.openai || "";
+  state.providers.claude.selectedModel = normalized.providerModels.claude || "";
+  els.userChip.textContent = user ? `${user.name || user.email}` : "";
+  els.userChip.classList.toggle("hidden", !user);
+}
+
+async function loadUserSettings(user) {
+  if (!state.firebase.db || !user?.uid) {
+    return normalizeUserSettings({}, user);
   }
+
+  const ref = doc(state.firebase.db, "users", user.uid);
+  const snapshot = await getDoc(ref);
+  if (!snapshot.exists()) {
+    const defaults = normalizeUserSettings({}, user);
+    await setDoc(
+      ref,
+      {
+        ...defaults,
+        email: user.email || "",
+        displayName: user.name || user.email || "",
+        picture: user.picture || "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+    return defaults;
+  }
+
+  return normalizeUserSettings(snapshot.data(), user);
+}
+
+async function persistUserSettings() {
+  if (!state.firebase.db || !state.auth.user?.uid || !state.auth.settings) return;
+  const ref = doc(state.firebase.db, "users", state.auth.user.uid);
+  await setDoc(
+    ref,
+    {
+      ...state.auth.settings,
+      email: state.auth.user.email || state.auth.settings.email || "",
+      displayName: state.auth.user.name || state.auth.settings.displayName || "",
+      picture: state.auth.user.picture || state.auth.settings.picture || "",
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
 }
 
 function saveUserSettings() {
-  if (!state.auth.user?.email || !state.auth.settings) return;
-  localStorage.setItem(getUserSettingsStorageKey(state.auth.user.email), JSON.stringify(state.auth.settings));
-}
-
-function setCurrentUser(user) {
-  state.auth.user = user;
-  state.auth.settings = loadUserSettings(user?.email);
-  state.providers.openai.apiKey =
-    state.auth.settings.providerApiKeys.openai || state.auth.settings.env.OPENAI_API_KEY || "";
-  state.providers.claude.apiKey =
-    state.auth.settings.providerApiKeys.claude || state.auth.settings.env.ANTHROPIC_API_KEY || "";
-  state.providers.openai.selectedModel = state.auth.settings.providerModels.openai || "";
-  state.providers.claude.selectedModel = state.auth.settings.providerModels.claude || "";
-  els.userChip.textContent = user ? `${user.name || user.email}` : "";
-  els.userChip.classList.toggle("hidden", !user);
+  void persistUserSettings().catch(() => {});
 }
 
 function createSlashMenuState() {
@@ -1349,49 +1402,36 @@ function setProvider(provider) {
   renderModelSelect();
 }
 
-function decodeJwtPayload(token) {
-  const payload = token.split(".")[1];
-  if (!payload) return null;
-  const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-  const json = atob(base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "="));
-  return JSON.parse(json);
-}
-
-function persistAuthSession(user) {
-  if (user) {
-    localStorage.setItem("dfm-auth-session", JSON.stringify(user));
-  } else {
-    localStorage.removeItem("dfm-auth-session");
-  }
-}
-
-function loadAuthSession() {
-  try {
-    const raw = localStorage.getItem("dfm-auth-session");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
 async function fetchPublicConfig() {
   try {
     const response = await fetch("/api/config");
     const data = await response.json();
-    state.auth.clientId = data.googleClientId || "";
+    state.auth.firebaseConfig = data.firebaseConfig || null;
   } catch {
-    state.auth.clientId = "";
+    state.auth.firebaseConfig = null;
   }
+}
+
+function isFirebaseConfigReady() {
+  const config = state.auth.firebaseConfig || {};
+  return Boolean(config.apiKey && config.projectId && config.appId);
 }
 
 function renderAuthUi() {
   const signedIn = Boolean(state.auth.user);
+  const ready = state.auth.ready && Boolean(state.firebase.auth);
   els.authOverlay.classList.toggle("hidden", signedIn);
   els.signOutBtn.classList.toggle("hidden", !signedIn);
+  els.googleSignInBtn.disabled = !ready || state.auth.loading;
+
   if (!signedIn) {
-    els.authNote.textContent = state.auth.clientId
-      ? "Loading Google sign-in..."
-      : "Set GOOGLE_CLIENT_ID in Vercel to enable Google sign-in.";
+    if (!isFirebaseConfigReady()) {
+      els.authNote.textContent = "Set Firebase env vars in Vercel to enable Google sign-in and saved workspaces.";
+    } else if (!ready) {
+      els.authNote.textContent = "Connecting to Firebase...";
+    } else {
+      els.authNote.textContent = "Sign in with Google to open your workspace.";
+    }
     return;
   }
   const user = state.auth.user;
@@ -1399,78 +1439,78 @@ function renderAuthUi() {
   els.userChip.textContent = `${user.name || user.email}`;
 }
 
-function initializeGoogleSignIn() {
-  if (!state.auth.clientId || !window.google?.accounts?.id) {
+async function initializeFirebaseAuth() {
+  if (!isFirebaseConfigReady()) {
+    state.auth.ready = false;
     renderAuthUi();
     return;
   }
 
-  google.accounts.id.initialize({
-    client_id: state.auth.clientId,
-    callback: (response) => {
-      try {
-        const payload = decodeJwtPayload(response.credential);
-        if (!payload?.email) throw new Error("Google sign-in failed.");
-        const user = {
-          id: payload.sub,
-          email: payload.email,
-          name: payload.name || payload.email,
-          picture: payload.picture || ""
-        };
-        persistAuthSession(user);
-        setCurrentUser(user);
-        state.auth.loading = false;
-        renderAuthUi();
-        syncApiKeyIntoState();
-        render();
-      } catch (error) {
-        setStatus(error.message || "Google sign-in failed.");
-      }
+  const app = getApps().length ? getApps()[0] : initializeApp(state.auth.firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  state.firebase.app = app;
+  state.firebase.auth = auth;
+  state.firebase.db = db;
+  state.firebase.provider = new GoogleAuthProvider();
+  state.auth.ready = true;
+
+  els.googleSignInBtn.addEventListener("click", async () => {
+    try {
+      await signInWithPopup(state.firebase.auth, state.firebase.provider);
+    } catch (error) {
+      setStatus(error?.message || "Google sign-in failed.");
     }
   });
 
-  google.accounts.id.renderButton(els.googleSignInBtn, {
-    theme: "outline",
-    size: "large",
-    text: "continue_with",
-    shape: "pill",
-    width: 340
+  onAuthStateChanged(state.firebase.auth, async (firebaseUser) => {
+    if (!firebaseUser) {
+      state.auth.user = null;
+      state.auth.settings = null;
+      state.providers.openai = createProviderState();
+      state.providers.claude = createProviderState();
+      els.apiKey.value = "";
+      els.modelSelect.innerHTML = '<option value="">Enter an API key to load models</option>';
+      renderAuthUi();
+      render();
+      return;
+    }
+
+    const user = {
+      uid: firebaseUser.uid,
+      email: firebaseUser.email || "",
+      name: firebaseUser.displayName || firebaseUser.email || "",
+      picture: firebaseUser.photoURL || ""
+    };
+
+    try {
+      const settings = await loadUserSettings(user);
+      applyUserSettings(user, settings);
+      renderAuthUi();
+      syncApiKeyIntoState();
+      render();
+    } catch (error) {
+      setStatus(error?.message || "Unable to load workspace settings.");
+    } finally {
+      state.auth.loading = false;
+      renderAuthUi();
+    }
   });
 
   renderAuthUi();
 }
 
-function signOut() {
-  persistAuthSession(null);
-  state.auth.user = null;
-  state.auth.settings = null;
-  state.providers.openai = createProviderState();
-  state.providers.claude = createProviderState();
-  els.apiKey.value = "";
-  els.modelSelect.innerHTML = '<option value="">Enter an API key to load models</option>';
-  renderAuthUi();
-  render();
+async function signOut() {
+  if (state.firebase.auth) {
+    await firebaseSignOut(state.firebase.auth);
+  }
 }
 
 async function bootstrapApp() {
-  const session = loadAuthSession();
-  if (session?.email) {
-    setCurrentUser(session);
-  }
-
   await fetchPublicConfig();
   state.auth.loading = false;
   renderAuthUi();
-
-  if (window.google?.accounts?.id) {
-    initializeGoogleSignIn();
-  } else {
-    window.setTimeout(initializeGoogleSignIn, 100);
-  }
-
-  if (state.auth.user) {
-    render();
-  }
+  await initializeFirebaseAuth();
 }
 
 function buildAiColumnConfig() {
