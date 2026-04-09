@@ -888,7 +888,14 @@ async function shouldRunJob({ provider, apiKey, model, conditionPrompt, job }) {
   });
 
   const answer = String(data.result || "").trim().toUpperCase();
-  return answer.startsWith("RUN");
+  if (!answer) return true;
+  if (/\bSKIP\b|\bFALSE\b|\bNO\b/.test(answer) && !/\bRUN\b|\bTRUE\b|\bYES\b/.test(answer)) {
+    return false;
+  }
+  if (/\bRUN\b|\bTRUE\b|\bYES\b/.test(answer)) {
+    return true;
+  }
+  return true;
 }
 
 async function loadModels() {
@@ -1116,7 +1123,7 @@ async function executeAiColumnRow(sheet, row, col, config) {
   });
 
   if (!shouldRun) {
-    return { status: "skipped", message: `Skipped row ${row + 1} for "${config.name}".` };
+    return { status: "skipped", message: `Skipped row ${row + 1} for "${config.name}" because the condition returned SKIP.` };
   }
 
   const resolvedPrompt = resolvePromptTemplate(config.prompt, context);
