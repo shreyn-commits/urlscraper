@@ -261,10 +261,24 @@ td {
 
 .column-header {
   min-width: 140px;
-  padding: 12px 10px;
+  padding: 10px 10px;
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+.column-header-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.column-header-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #b45611;
 }
 
 .row-header {
@@ -292,6 +306,33 @@ td {
   padding: 10px 12px;
   background: transparent;
   color: var(--text);
+}
+
+.ai-cell-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.ai-cell-wrap input {
+  min-width: 0;
+}
+
+.cell-run-btn {
+  border: 0;
+  border-left: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 0;
+  background: rgba(255, 122, 26, 0.08);
+  color: #a25212;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 10px;
+  min-width: 54px;
+}
+
+.cell-run-btn:hover {
+  transform: none;
+  background: rgba(255, 122, 26, 0.14);
 }
 
 .sheet-cell.selected {
@@ -362,6 +403,12 @@ td {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .grow {
@@ -457,6 +504,10 @@ button:focus {
   }
 
   .inline-field {
+    grid-template-columns: 1fr;
+  }
+
+  .action-row {
     grid-template-columns: 1fr;
   }
 

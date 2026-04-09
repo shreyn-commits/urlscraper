@@ -105,6 +105,11 @@
               </select>
             </label>
 
+            <label class="field">
+              <span>AI column name</span>
+              <input id="aiColumnName" placeholder="For example: Enriched Summary" />
+            </label>
+
             <label class="field grow">
               <span>Prompt</span>
               <div class="textarea-shell">
@@ -133,7 +138,12 @@
               </p>
             </label>
 
-            <button id="runAiBtn" class="primary" type="button">Run AI</button>
+            <div class="action-row">
+              <button id="createAiColumnBtn" type="button">Create AI Column</button>
+              <button id="runSelectedRowBtn" type="button">Run Selected Row</button>
+            </div>
+
+            <button id="runAiBtn" class="primary" type="button">Run AI Now</button>
             <p class="ai-note">
               Row runs write one result column to the right. Cell and range runs
               write results to the right of the selected area so your source data stays intact.

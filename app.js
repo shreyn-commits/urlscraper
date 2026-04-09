@@ -35,10 +35,13 @@ const els = {
   modelHelp: document.getElementById("modelHelp"),
   apiKey: document.getElementById("apiKey"),
   aiScope: document.getElementById("aiScope"),
+  aiColumnName: document.getElementById("aiColumnName"),
   prompt: document.getElementById("prompt"),
   conditionPrompt: document.getElementById("conditionPrompt"),
   promptSlashMenu: document.getElementById("promptSlashMenu"),
   conditionSlashMenu: document.getElementById("conditionSlashMenu"),
+  createAiColumnBtn: document.getElementById("createAiColumnBtn"),
+  runSelectedRowBtn: document.getElementById("runSelectedRowBtn"),
   runAiBtn: document.getElementById("runAiBtn"),
   status: document.getElementById("status"),
   sheetMeta: document.getElementById("sheetMeta")
@@ -58,7 +61,8 @@ function createSheet(name, rows, cols) {
   return {
     id: `sheet-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,
-    cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => ""))
+    cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => "")),
+    aiColumns: {}
   };
 }
 
@@ -66,6 +70,33 @@ state.activeSheetId = state.sheets[0].id;
 
 function getActiveSheet() {
   return state.sheets.find((sheet) => sheet.id === state.activeSheetId) || state.sheets[0];
+}
+
+function normalizeAiColumns(sheet) {
+  if (!sheet.aiColumns) sheet.aiColumns = {};
+  return sheet.aiColumns;
+}
+
+function shiftAiColumnsOnInsert(sheet, insertedAt) {
+  const current = normalizeAiColumns(sheet);
+  const next = {};
+  for (const [key, value] of Object.entries(current)) {
+    const col = Number(key);
+    next[col >= insertedAt ? col + 1 : col] = value;
+  }
+  sheet.aiColumns = next;
+}
+
+function shiftAiColumnsOnDelete(sheet, startCol, endCol) {
+  const current = normalizeAiColumns(sheet);
+  const next = {};
+  const width = endCol - startCol + 1;
+  for (const [key, value] of Object.entries(current)) {
+    const col = Number(key);
+    if (col < startCol) next[col] = value;
+    if (col > endCol) next[col - width] = value;
+  }
+  sheet.aiColumns = next;
 }
 
 function getSelectionBounds() {
@@ -310,6 +341,7 @@ function renderTabs() {
 
 function renderSheet() {
   const sheet = getActiveSheet();
+  normalizeAiColumns(sheet);
   ensureSize(sheet, INITIAL_ROWS, INITIAL_COLS);
   const cache = new Map();
   const bounds = getSelectionBounds();
@@ -318,7 +350,9 @@ function renderSheet() {
 
   const headerCells = Array.from({ length: colCount }, (_, col) => {
     const selected = col >= bounds.startCol && col <= bounds.endCol ? " selected-header" : "";
-    return `<th class="column-header${selected}" data-col-header="${col}">${columnLabel(col)}</th>`;
+    const aiConfig = sheet.aiColumns[col];
+    const meta = aiConfig ? `<span class="column-header-meta">${escapeHtml(aiConfig.name)}</span>` : "";
+    return `<th class="column-header${selected}" data-col-header="${col}"><span class="column-header-label">${columnLabel(col)}</span>${meta}</th>`;
   }).join("");
 
   const bodyRows = Array.from({ length: rowCount }, (_, row) => {
@@ -326,6 +360,7 @@ function renderSheet() {
     const cells = Array.from({ length: colCount }, (_, col) => {
       const raw = getRawCell(sheet, row, col);
       const display = getDisplayCell(sheet, row, col, cache);
+      const aiConfig = sheet.aiColumns[col];
       const isActive = row === state.selection.endRow && col === state.selection.endCol;
       const inSelection = row >= bounds.startRow && row <= bounds.endRow && col >= bounds.startCol && col <= bounds.endCol;
       const classes = ["sheet-cell"];
@@ -333,15 +368,20 @@ function renderSheet() {
       if (isActive) classes.push("active");
       if (raw.startsWith("=")) classes.push("formula");
       const value = isActive ? raw : display;
-      return `
-        <td class="${classes.join(" ")}" data-cell="true" data-row="${row}" data-col="${col}">
+      const inputMarkup = `
           <input
             data-cell-input="true"
             data-row="${row}"
             data-col="${col}"
             value="${escapeHtml(value)}"
             spellcheck="false"
-          />
+          />`;
+      const cellInner = aiConfig
+        ? `<div class="ai-cell-wrap">${inputMarkup}<button class="cell-run-btn" data-run-ai-row="${row}" data-run-ai-col="${col}" type="button">Run</button></div>`
+        : inputMarkup;
+      return `
+        <td class="${classes.join(" ")}" data-cell="true" data-row="${row}" data-col="${col}">
+          ${cellInner}
         </td>`;
     }).join("");
 
@@ -398,7 +438,7 @@ function selectRow(row) {
 
 function selectColumn(col) {
   const sheet = getActiveSheet();
-  const lastRow = sheet.cells.length - 1;
+  const lastRow = Math.max(sheet.cells.length - 1, INITIAL_ROWS - 1);
   state.selection = { startRow: 0, startCol: col, endRow: lastRow, endCol: col };
   render();
 }
@@ -459,6 +499,7 @@ function importCSV(text) {
 
   const maxCols = Math.max(...rows.map((row) => row.length));
   const sheet = getActiveSheet();
+  sheet.aiColumns = {};
   sheet.cells = Array.from({ length: Math.max(rows.length, INITIAL_ROWS) }, (_, rowIndex) =>
     Array.from({ length: Math.max(maxCols, INITIAL_COLS) }, (_, colIndex) => rows[rowIndex]?.[colIndex] ?? "")
   );
@@ -496,6 +537,7 @@ function insertRow() {
 function insertColumn() {
   const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
+  shiftAiColumnsOnInsert(sheet, bounds.endCol + 1);
   for (const row of sheet.cells) {
     row.splice(bounds.endCol + 1, 0, "");
   }
@@ -517,6 +559,7 @@ function deleteRow() {
 function deleteColumn() {
   const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
+  shiftAiColumnsOnDelete(sheet, bounds.startCol, bounds.endCol);
   for (const row of sheet.cells) {
     row.splice(bounds.startCol, bounds.endCol - bounds.startCol + 1);
     if (!row.length) row.push("");
@@ -601,6 +644,7 @@ function resolvePromptTemplate(template, context) {
 
 function getSlashItems() {
   const sheet = getActiveSheet();
+  normalizeAiColumns(sheet);
   const used = getUsedRange(sheet);
   const totalCols = Math.max(used.cols, state.selection.endCol + 1, INITIAL_COLS);
   const helpers = [
@@ -614,9 +658,12 @@ function getSlashItems() {
 
   const columns = Array.from({ length: totalCols }, (_, col) => {
     const letter = columnLabel(col);
+    const aiLabel = sheet.aiColumns[col]?.name;
     return {
       label: `/${letter}`,
-      subtitle: `Insert column ${letter} from the current row`,
+      subtitle: aiLabel
+        ? `Insert column ${letter} from the current row (${aiLabel})`
+        : `Insert column ${letter} from the current row`,
       token: `{{column:${letter}}}`,
       search: `${letter.toLowerCase()} column ${letter.toLowerCase()}`
     };
@@ -796,6 +843,106 @@ async function loadModels() {
   }
 }
 
+function getConfiguredModel() {
+  return els.modelSelect.value || state.selectedModel;
+}
+
+function buildAiColumnConfig() {
+  const model = getConfiguredModel();
+  const prompt = els.prompt.value.trim();
+  const name = els.aiColumnName.value.trim() || "AI Column";
+
+  if (!prompt) {
+    throw new Error("Add a prompt before creating an AI column.");
+  }
+
+  if (!model) {
+    throw new Error("Load models for this key and choose one first.");
+  }
+
+  return {
+    name,
+    provider: els.provider.value,
+    model,
+    prompt,
+    condition: els.conditionPrompt.value.trim()
+  };
+}
+
+function createAiColumn() {
+  try {
+    const config = buildAiColumnConfig();
+    const sheet = getActiveSheet();
+    const insertAt = getSelectionBounds().endCol + 1;
+    shiftAiColumnsOnInsert(sheet, insertAt);
+    for (const row of sheet.cells) {
+      row.splice(insertAt, 0, "");
+    }
+    normalizeAiColumns(sheet)[insertAt] = config;
+    selectCell(state.selection.endRow, insertAt, false, true);
+    setStatus(`Created AI column "${config.name}".`);
+    render();
+  } catch (error) {
+    setStatus(error.message || "Unable to create AI column.");
+    renderSheet();
+  }
+}
+
+async function runAiColumnCell(row, col) {
+  const sheet = getActiveSheet();
+  normalizeAiColumns(sheet);
+  const config = sheet.aiColumns[col];
+  if (!config) {
+    setStatus("Select an AI column cell first.");
+    renderSheet();
+    return;
+  }
+
+  const used = getUsedRange(sheet);
+  const rowPayload = getRowPayload(sheet, row, 0, Math.max(used.cols - 1, col));
+  const context = buildPromptContext(sheet, row, col, rowPayload);
+
+  try {
+    const resolvedCondition = config.condition ? resolvePromptTemplate(config.condition, context) : "";
+    const shouldRun = await shouldRunJob({
+      provider: config.provider,
+      apiKey: els.apiKey.value.trim(),
+      model: config.model,
+      conditionPrompt: resolvedCondition,
+      job: { input: rowPayload, context }
+    });
+
+    if (!shouldRun) {
+      setStatus(`Skipped row ${row + 1} for "${config.name}".`);
+      return;
+    }
+
+    setStatus(`Running row ${row + 1} for "${config.name}"...`);
+    renderSheet();
+    const resolvedPrompt = resolvePromptTemplate(config.prompt, context);
+    const data = await callAiEndpoint({
+      provider: config.provider,
+      apiKey: els.apiKey.value.trim(),
+      model: config.model,
+      prompt: resolvedPrompt,
+      text: rowPayload
+    });
+    setRawCell(sheet, row, col, data.result || "");
+    setStatus(`Completed row ${row + 1} for "${config.name}".`);
+    renderSheet();
+  } catch (error) {
+    setRawCell(sheet, row, col, error.message || "Request failed");
+    setStatus(error.message || "Request failed");
+    renderSheet();
+  }
+}
+
+function runSelectedRowForActiveAiColumn() {
+  const row = state.selection.endRow;
+  const col = state.selection.endCol;
+  runAiColumnCell(row, col);
+}
+
 function buildJobs(scope) {
   const sheet = getActiveSheet();
   const bounds = getSelectionBounds();
@@ -943,6 +1090,9 @@ async function runAi() {
 
 function bindTableEvents() {
   els.sheet.addEventListener("pointerdown", (event) => {
+    const runButton = event.target.closest("[data-run-ai-row]");
+    if (runButton) return;
+
     const cell = event.target.closest("[data-cell]");
     const rowHeader = event.target.closest("[data-row-header]");
     const colHeader = event.target.closest("[data-col-header]");
@@ -995,6 +1145,16 @@ function bindTableEvents() {
     if (!input) return;
     render();
   });
+
+  els.sheet.addEventListener("click", (event) => {
+    const runButton = event.target.closest("[data-run-ai-row]");
+    if (!runButton) return;
+    event.preventDefault();
+    const row = Number(runButton.dataset.runAiRow);
+    const col = Number(runButton.dataset.runAiCol);
+    selectCell(row, col, false, false);
+    runAiColumnCell(row, col);
+  });
 }
 
 function bindPromptTextarea(textarea) {
@@ -1027,6 +1187,8 @@ function bindUi() {
   els.deleteColBtn.addEventListener("click", deleteColumn);
   els.newSheetBtn.addEventListener("click", addSheet);
   els.renameSheetBtn.addEventListener("click", renameSheet);
+  els.createAiColumnBtn.addEventListener("click", createAiColumn);
+  els.runSelectedRowBtn.addEventListener("click", runSelectedRowForActiveAiColumn);
   els.runAiBtn.addEventListener("click", runAi);
   els.refreshModelsBtn.addEventListener("click", loadModels);
 
